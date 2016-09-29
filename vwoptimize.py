@@ -1460,7 +1460,7 @@ def calculate_score(metric, y_true, y_pred, sample_weight, is_binary, threshold,
         fullname = metrics_on_score[metric]
         assert is_binary, 'Cannot apply %s/%s on multiclass' % (metric, fullname)
         func = getattr(sklearn.metrics, fullname)
-        return func(y_true, y_pred, sample_weight=sample_weight)
+        return func(y_true, y_pred, **extra_args)
     elif metric in metrics_on_label:
         fullname = metrics_on_label[metric]
         func = getattr(sklearn.metrics, fullname)
