@@ -173,15 +173,16 @@ def guess_format(filename):
 
 def _read_lines_vw(fobj):
     for orig_line in fobj:
-        line = orig_line.strip()
-        if not line:
+        if not orig_line.strip():
             continue
-        items = line.split()
-        klass = items[0]
-        if klass.startswith("'"):
+        items = orig_line.split('|')
+        if len(items) <= 1:
+            continue
+        prefix_items = items[0].strip().split()
+        if not prefix_items or not prefix_items or prefix_items[0].startswith("'"):
             yield (None, orig_line)
         else:
-            yield (klass, orig_line)
+            yield (prefix_items[0], orig_line)
 
 
 def _read_lines_csv(reader):
