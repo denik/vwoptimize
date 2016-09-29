@@ -22,11 +22,6 @@ def grab_output(cmd):
     return out
 
 
-def unlink(filename):
-    if os.path.exists(filename):
-        os.unlink(filename)
-
-
 def cleanup_tmp():
     system('rm -fr tmp')
 

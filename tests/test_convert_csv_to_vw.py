@@ -1,4 +1,6 @@
-from util import *
+import unittest
+from util import TestCase, grab_output, system
+
 
 MSG = 'Found 2 integer classes: 1: 66.67%, 2: 33.33%\n'
 
@@ -6,7 +8,7 @@ MSG = 'Found 2 integer classes: 1: 66.67%, 2: 33.33%\n'
 class Test(TestCase):
 
     def test_simple(self):
-        system('%s ../vwoptimize.py -d simple.csv --tovw tmp/tmp.vw --columnspec y,text,text  2>&1 | tee tmp/out' % (sys.executable, ))
+        system('PYTHON ../vwoptimize.py -d simple.csv --tovw tmp/tmp.vw --columnspec y,text,text  2>&1 | tee tmp/out')
         self.assertMultiLineEqual(open('tmp/tmp.vw').read(), '''1 | Hello World! first class
 2 | Goodbye World. second class
 1 | hello first class again\n''')
@@ -14,7 +16,7 @@ class Test(TestCase):
 
     def _test_weight(self, opt_value, expected_out):
         for opt in ('--weight', '--weight_train'):
-            out = grab_output('%s ../vwoptimize.py %s %s -d simple.csv --tovw tmp/tmp.vw --columnspec y,text,text 2>&1' % (sys.executable, opt, opt_value))
+            out = grab_output('PYTHON ../vwoptimize.py %s %s -d simple.csv --tovw tmp/tmp.vw --columnspec y,text,text 2>&1' % (opt, opt_value))
             self.assertMultiLineEqual(open('tmp/tmp.vw').read(), '''1 0.5 | Hello World! first class
 2 | Goodbye World. second class
 1 0.5 | hello first class again\n''')

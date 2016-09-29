@@ -1,4 +1,5 @@
-from util import *
+import unittest
+from util import TestCase
 
 
 class Test(TestCase):

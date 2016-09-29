@@ -1,13 +1,13 @@
-from util import *
+import unittest
+from util import TestCase
 
 
 class Test(TestCase):
 
     def test_gridsearch_passes(self):
-        self.assert_command_output('PYTHON ../vwoptimize.py -d iris.vw --ect 0 --passes 1/3/5? -c -k --holdout_off --metric acc --quiet', '''
+        self.assert_command_output('PYTHON ../vwoptimize.py -d iris.vw --ect 0 --passes 1/5? -c -k --holdout_off --metric acc --quiet', '''
 Found 3 integer classes: 1: 33.33%, 2: 33.33%, 3: 33.33%
 Result vw --ect 3 -c -k --holdout_off --quiet --passes 1... acc=0.9067
-Result vw --ect 3 -c -k --holdout_off --quiet --passes 3... acc=0.9133*
 Result vw --ect 3 -c -k --holdout_off --quiet --passes 5... acc=0.9467*
 Best acc with 'no preprocessing': 0.9467*
 Best preprocessor options: <none>
