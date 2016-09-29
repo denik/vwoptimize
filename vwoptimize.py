@@ -195,9 +195,7 @@ def _read_lines_csv(reader):
 
         bad_line = False
 
-        if len(row) <= 1:
-            bad_line = 'Only one column'
-        elif expected_columns is not None and len(row) != expected_columns:
+        if expected_columns is not None and len(row) != expected_columns:
             bad_line = 'Expected %s columns, got %s' % (expected_columns, len(row))
 
         if bad_line:
