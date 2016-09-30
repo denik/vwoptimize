@@ -17,6 +17,7 @@ import numpy as np
 csv.field_size_limit(10000000)
 LOG_LEVEL = 1
 MAIN_PID = str(os.getpid())
+KEEPTMP = False
 
 
 for path in '.vwoptimize /tmp/vwoptimize'.split():
@@ -40,6 +41,8 @@ def htmlparser_unescape(text, cache=[]):
 
 
 def unlink(*filenames):
+    if KEEPTMP:
+        return
     for filename in filenames:
         if not filename:
             continue
@@ -1605,6 +1608,7 @@ def main():
     # using preprocessor standalone:
     parser.add_option('--tovw')
     parser.add_option('--tovw_simple')
+    parser.add_option('--format', help='File format, one of vw|tsv|csv. If not provided, will be guessed from file extension or from file contents')
 
     # using as perf
     parser.add_option('--report', action='store_true')
@@ -1614,11 +1618,12 @@ def main():
     # logging and debugging and misc
     parser.add_option('--morelogs', action='count', default=0)
     parser.add_option('--lesslogs', action='count', default=0)
-    parser.add_option('--format', help='File format, one of vw|tsv|csv. If not provided, will be guessed from file extension or from file contents')
+    parser.add_option('--keeptmp', action='store_true')
 
     options, args = parser.parse_args()
 
     globals()['LOG_LEVEL'] += options.lesslogs - options.morelogs
+    globals()['KEEPTMP'] = options.keeptmp
 
     options.weight = parse_weight(options.weight, options.labels)
     options.weight_train = parse_weight(options.weight_train, options.labels) or options.weight
