@@ -17,7 +17,6 @@ import numpy as np
 csv.field_size_limit(10000000)
 LOG_LEVEL = 1
 MAIN_PID = str(os.getpid())
-vowpal_wabbit_error_messages = ['error', "won't work right", 'errno', "can't open", 'VW::vw_exception']
 
 
 for path in '.vwoptimize /tmp/vwoptimize'.split():
@@ -381,7 +380,7 @@ def vw_cross_validation(folds, vw_args, workers=None, p_fname=None, r_fname=None
     audit_filenames = []
     training_commands = []
     testing_commands = []
-    outputs = []
+    models = []
     to_cleanup = []
 
     if '--quiet' not in vw_args:
@@ -400,7 +399,7 @@ def vw_cross_validation(folds, vw_args, workers=None, p_fname=None, r_fname=None
         assert testset and os.path.exists(testset), testset
 
         model_filename = get_temp_filename('model')
-        to_cleanup.append(model_filename)
+        assert not os.path.exists(model_filename), 'internal error: temporary file already exists: %r' % model_filename
 
         p_filename = '%s.predictions' % model_filename
         with_p = '-p %s' % p_filename
@@ -423,42 +422,28 @@ def vw_cross_validation(folds, vw_args, workers=None, p_fname=None, r_fname=None
             my_args += ' --cache_file %s' % cache_file
             to_cleanup.append(cache_file)
 
-        train_capture = get_temp_filename('train_capture')
-        test_capture = get_temp_filename('test_capture')
-        outputs.append(train_capture)
-        outputs.append(test_capture)
-
         if audit:
             audit_filename = '%s.audit' % model_filename
             audit = '-a > %s' % audit_filename
-            capture = '2> %s' % test_capture
             audit_filenames.append(audit_filename)
         else:
             audit_filename = ''
             audit = ''
-            capture = '&> %s' % test_capture
 
-        training_command = 'cat %s | vw -f %s %s &> %s' % (trainset, model_filename, my_args, train_capture)
-        testing_command = 'vw --quiet -d %s -t -i %s %s %s %s %s' % (testset, model_filename, with_p, with_r, audit, capture)
+        training_command = 'cat %s | vw -f %s %s' % (trainset, model_filename, my_args)
+        testing_command = 'vw --quiet -d %s -t -i %s %s %s %s' % (testset, model_filename, with_p, with_r, audit)
         training_commands.append(training_command)
         testing_commands.append(testing_command)
-
-    has_error = False
 
     try:
         success = run_subprocesses(training_commands, workers=workers, log_level=-1)
 
+        for name in models:
+            if not os.path.exists(name):
+                sys.exit('vw failed to write a model')
+
         if success:
             success = run_subprocesses(testing_commands, workers=workers, log_level=-1)
-
-        for output in outputs:
-            if output and os.path.exists(output):
-                has_error = print_vw_output(open(output))
-                if has_error:
-                    break
-
-        if has_error:
-            sys.exit('vw failed: %s' % has_error)
 
         if not success:
             sys.exit('vw failed')
@@ -480,25 +465,7 @@ def vw_cross_validation(folds, vw_args, workers=None, p_fname=None, r_fname=None
         unlink(*r_filenames)
         unlink(*audit_filenames)
         unlink(*to_cleanup)
-        unlink(*outputs)
-
-
-def print_vw_output(lines):
-    prev_line = None
-    has_error = False
-    for line in lines:
-        if not line.strip():
-            continue
-        if line == prev_line:
-            continue
-        sys.stderr.write(line.rstrip() + '\n')
-        msg = line.lower()
-        if not has_error:
-            for errmsg in vowpal_wabbit_error_messages:
-                if errmsg in msg:
-                    has_error = line.strip()
-        prev_line = line
-    return has_error
+        unlink(*models)
 
 
 def _load_first_float_from_each_string(file):
