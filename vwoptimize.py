@@ -253,7 +253,7 @@ def system(cmd, log_level=0):
         sys.exit(1)
 
 
-def split_file(source, nfolds=None, limit=None, shuffle=False):
+def split_file(source, nfolds=None, limit=None, shuffle=False, ignoreheader=False):
     if nfolds is None:
         nfolds = 10
 
@@ -266,6 +266,8 @@ def split_file(source, nfolds=None, limit=None, shuffle=False):
 
     if shuffle:
         lines = open_regular_or_compressed(source).readlines()
+        if ignoreheader:
+            lines = lines[1:]
         total_lines = len(lines)
         random.shuffle(lines)
         source = lines
@@ -279,6 +281,10 @@ def split_file(source, nfolds=None, limit=None, shuffle=False):
             source.seek(0)
 
         source = open_regular_or_compressed(source)
+
+        if ignoreheader:
+            source.next()
+            total_lines -= 1
 
     if limit is not None:
         total_lines = min(total_lines, limit)
@@ -1266,7 +1272,7 @@ def get_balanced_weights(labels_counts):
     return result
 
 
-def _convert_any_to_vw(source, format, output, labels, weights, preprocessor, columnspec, ignoreheader):
+def _convert_any_to_vw(source, format, output, labels, weights, preprocessor, columnspec):
     assert format != 'vw'
     assert isinstance(columnspec, list)
 
@@ -1278,9 +1284,6 @@ def _convert_any_to_vw(source, format, output, labels, weights, preprocessor, co
 
     errors = 0
     for row in rows_source:
-        if ignoreheader:
-            ignoreheader = None
-            continue
         if len(row) != len(columnspec):
             sys.exit('Expected %r columns (%r), got %r (%r)' % (len(columnspec), columnspec, len(row), row))
         y = None
@@ -1357,7 +1360,8 @@ def convert_any_to_vw(source, format, output_filename, labels, weights, columnsp
             preprocessor_opts.extend(preprocessor)
 
     workers = _workers(workers)
-    batches, total_lines = split_file(source, nfolds=workers, shuffle=shuffle, limit=limit)
+    batches, total_lines = split_file(source, nfolds=workers, shuffle=shuffle, limit=limit, ignoreheader=ignoreheader)
+
     batches_out = [x + '.out' for x in batches]
 
     labels = ','.join(labels or [])
@@ -1377,9 +1381,6 @@ def convert_any_to_vw(source, format, output_filename, labels, weights, columnsp
 
         if columnspec:
             common_cmd += ['--columnspec', quote(','.join(str(x) for x in columnspec))]
-
-        if ignoreheader:
-            common_cmd += ['--ignoreheader']
 
         common_cmd.extend(preprocessor_opts)
 
@@ -1644,6 +1645,7 @@ def main():
         assert not options.shuffle
         assert not options.limit
         assert not options.workers or options.workers == 1, options.workers
+        assert not options.ignoreheader
         assert options.format and options.format in ('vw', 'csv', 'tsv')
         assert options.weight_train != 'balanced', 'not supported here'
         preprocessor = Preprocessor.from_options(options.__dict__)
@@ -1654,8 +1656,7 @@ def main():
             options.labels,
             options.weight_train,
             preprocessor,
-            options.columnspec,
-            options.ignoreheader)
+            options.columnspec)
         sys.exit(0)
 
     if not options.cv:
