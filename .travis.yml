@@ -1,11 +1,15 @@
 language: python
 python:
  - "2.7"
+cache:
+ pip: true
+ directories:
+   - bincache
 before_install:
  - sudo apt-get update -qq
  - sudo apt-get install -qq libboost-all-dev
- - git clone --depth 1 https://github.com/JohnLangford/vowpal_wabbit.git /tmp/vw
- - cd /tmp/vw && sudo make install && cd -
+ - sudo python tests/install_vw.py
+ - vw --version
 install:
  - pip install -r requirements.txt
  - pip install flake8
