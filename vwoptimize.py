@@ -387,6 +387,11 @@ def vw_cross_validation(folds, vw_args, workers=None, p_fname=None, r_fname=None
     if '--quiet' not in vw_args:
         vw_args += ' --quiet'
 
+    # verify that the the options are valid
+    training_command = 'head -n 10 %s | vw %s' % (folds[0], vw_args)
+    if os.system(training_command) != 0:
+        sys.exit(1)
+
     for test_fold in xrange(len(folds)):
         trainset = [fold for (index, fold) in enumerate(folds) if index != test_fold]
         assert trainset and os.path.exists(trainset[0]), trainset
