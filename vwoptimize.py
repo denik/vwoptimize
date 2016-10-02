@@ -1616,6 +1616,9 @@ def main():
 
     used_stdin = False
     if options.data in (None, '/dev/stdin', '-'):
+        if options.data is None:
+            log('Reading from stdin...', log_level=1)
+
         used_stdin = True
         from StringIO import StringIO
         input = sys.stdin.read()
