@@ -8,7 +8,6 @@ import math
 import csv
 import re
 import subprocess
-import random
 import time
 from pipes import quote
 import numpy as np
@@ -256,7 +255,7 @@ def system(cmd, log_level=0):
         sys.exit(1)
 
 
-def split_file(source, nfolds=None, limit=None, shuffle=False, ignoreheader=False):
+def split_file(source, nfolds=None, ignoreheader=False):
     if nfolds is None:
         nfolds = 10
 
@@ -267,30 +266,19 @@ def split_file(source, nfolds=None, limit=None, shuffle=False, ignoreheader=Fals
     else:
         ext = 'xxx'
 
-    if shuffle:
-        lines = open_regular_or_compressed(source).readlines()
-        if ignoreheader:
-            lines = lines[1:]
-        total_lines = len(lines)
-        random.shuffle(lines)
-        source = lines
-    else:
-        # XXX already have examples_count
-        total_lines = 0
-        for line in open_regular_or_compressed(source):
-            total_lines += 1
+    # XXX already have examples_count
+    total_lines = 0
+    for line in open_regular_or_compressed(source):
+        total_lines += 1
 
-        if hasattr(source, 'seek'):
-            source.seek(0)
+    if hasattr(source, 'seek'):
+        source.seek(0)
 
-        source = open_regular_or_compressed(source)
+    source = open_regular_or_compressed(source)
 
-        if ignoreheader:
-            source.next()
-            total_lines -= 1
-
-    if limit is not None:
-        total_lines = min(total_lines, limit)
+    if ignoreheader:
+        source.next()
+        total_lines -= 1
 
     foldsize = int(math.ceil(total_lines / float(nfolds)))
     foldsize = max(foldsize, 1)
@@ -1347,7 +1335,7 @@ def _convert_any_to_vw(source, format, output, labels, weights, preprocessor, co
     output.close()
 
 
-def convert_any_to_vw(source, format, output_filename, labels, weights, columnspec, ignoreheader, preprocessor=None, shuffle=False, limit=None, workers=None):
+def convert_any_to_vw(source, format, output_filename, labels, weights, columnspec, ignoreheader, preprocessor=None, workers=None):
     assert format != 'vw'
 
     start = time.time()
@@ -1363,7 +1351,7 @@ def convert_any_to_vw(source, format, output_filename, labels, weights, columnsp
             preprocessor_opts.extend(preprocessor)
 
     workers = _workers(workers)
-    batches, total_lines = split_file(source, nfolds=workers, shuffle=shuffle, limit=limit, ignoreheader=ignoreheader)
+    batches, total_lines = split_file(source, nfolds=workers, ignoreheader=ignoreheader)
 
     batches_out = [x + '.out' for x in batches]
 
@@ -1468,10 +1456,7 @@ def preprocess_and_split(source, format, vw_filename, preprocessor, options, lab
 
     if format == 'vw':
         vw_filename = source
-        # XXXX --shuffle and --limit make sense for vw format and should be supported
         # XXX preprocessor can make sense too
-        assert not options.shuffle, 'TODO'
-        assert not options.limit, 'TODO'
         assert not preprocessor, 'TODO'
 
     else:
@@ -1484,11 +1469,9 @@ def preprocess_and_split(source, format, vw_filename, preprocessor, options, lab
             columnspec,
             ignoreheader,
             preprocessor=preprocessor,
-            shuffle=options.shuffle,   # XXX must also set seed
-            limit=options.limit,
             workers=options.workers)
 
-    folds, total = split_file(vw_filename, nfolds=options.nfolds, limit=options.limit)
+    folds, total = split_file(vw_filename, nfolds=options.nfolds)
     for fname in folds:
         assert os.path.exists(fname), fname
 
@@ -1583,7 +1566,6 @@ def main():
     parser.add_option('--workers', type=int)
     parser.add_option('--nfolds', type=int)
     parser.add_option('--metric', action='append')
-    parser.add_option('--limit', type=int, help="Only read first N lines from the source file")
 
     # class weight option
     parser.add_option('--weight', action='append', help='Class weights to use in CLASS:WEIGHT format', default=[])
@@ -1598,7 +1580,6 @@ def main():
     parser.add_option('-a', '--audit', action='store_true')
 
     # preprocessing options:
-    parser.add_option('--shuffle', action='store_true')
     parser.add_option('--labels')
     for opt in Preprocessor.ALL_OPTIONS:
         parser.add_option('--%s' % opt, action='store_true')
@@ -1647,8 +1628,6 @@ def main():
     options.columnspec = _make_proper_list(options.columnspec)
 
     if options.tovw_simple:
-        assert not options.shuffle
-        assert not options.limit
         assert not options.workers or options.workers == 1, options.workers
         assert not options.ignoreheader
         assert options.format and options.format in ('vw', 'csv', 'tsv')
@@ -1727,8 +1706,6 @@ def main():
             options.columnspec,
             options.ignoreheader,
             preprocessor,
-            shuffle=options.shuffle,
-            limit=options.shuffle,
             workers=options.workers)
         sys.exit(0)
 
@@ -1801,14 +1778,10 @@ def main():
                     options.columnspec,
                     options.ignoreheader,
                     preprocessor=preprocessor,
-                    shuffle=options.shuffle,   # XXX must also set seed
-                    limit=options.limit,
                     workers=options.workers)
 
             if options.cv:
-                # Note, do not put shuffle there, since we want vw_filename to correspond to --cv_predictions
-                # Shuffling is done above
-                folds, total_lines = split_file(vw_filename, nfolds=options.nfolds, limit=options.limit)
+                folds, total_lines = split_file(vw_filename, nfolds=options.nfolds)
 
                 assert len(folds) >= 2, folds
 
