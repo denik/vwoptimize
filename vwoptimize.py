@@ -393,7 +393,7 @@ def vw_cross_validation(folds, vw_args, workers=None, p_fname=None, r_fname=None
     if '--quiet' not in vw_args:
         vw_args += ' --quiet'
 
-    # verify that the the options are valid
+    # verify that the the options are valid and the file format is not completely off
     training_command = 'head -n 10 %s | vw %s' % (folds[0], vw_args)
     if os.system(training_command) != 0:
         sys.exit(1)
@@ -482,7 +482,7 @@ def _load_first_float_from_each_string(file):
     elif isinstance(file, basestring):
         file = open(file)
     else:
-        return file
+        raise AssertionError(limited_repr(file))
 
     result = []
 
@@ -1092,7 +1092,7 @@ def read_labels(filename, source, format, n_classes, columnspec, ignoreheader):
 
     label_index = columnspec.index('y')
 
-    log('Reading from %s', filename)
+    log('Reading labels from %s', filename or source)
     rows_source = open_anything(filename or source, format)
 
     all_integers = True
@@ -1453,42 +1453,7 @@ def calculate_score(metric, y_true, y_pred, sample_weight, is_binary, threshold,
         sys.exit('Cannot calculate metric: %r' % metric)
 
 
-def report(prefix, source, predictions, metric, n_classes, weight_metric, threshold):
-    y_true = np.array(_load_first_float_from_each_string(source))
-    y_pred = np.array(_load_first_float_from_each_string(predictions))
-    sample_weight = get_sample_weight(y_true, weight_metric)
-
-    for metric in metric:
-        print '%s%s: %g' % (prefix, metric, calculate_score(metric, y_true, y_pred, sample_weight, is_binary=n_classes is None, threshold=threshold))
-
-
-def preprocess_and_split(source, format, vw_filename, preprocessor, options, labels, weight_train, columnspec, ignoreheader):
-
-    if format == 'vw':
-        vw_filename = source
-        # XXX preprocessor can make sense too
-        assert not preprocessor, 'TODO'
-
-    else:
-        convert_any_to_vw(
-            source,
-            format,
-            vw_filename,
-            labels,
-            weight_train,
-            columnspec,
-            ignoreheader,
-            preprocessor=preprocessor,
-            workers=options.workers)
-
-    folds, total = split_file(vw_filename, nfolds=options.nfolds)
-    for fname in folds:
-        assert os.path.exists(fname), fname
-
-    return folds
-
-
-def main_tune(options, source, format, vw_filename, args, preprocessor_base, labels, weight_metric, weight_train, columnspec, ignoreheader, is_binary):
+def main_tune(options, source, format, args, preprocessor_base, labels, weight_metric, weight_train, columnspec, ignoreheader, is_binary):
     if preprocessor_base is None:
         preprocessor_base = []
     else:
@@ -1523,7 +1488,26 @@ def main_tune(options, source, format, vw_filename, args, preprocessor_base, lab
 
         already_done[str(preprocessor)] = preprocessor_opts
 
-        folds = preprocess_and_split(source, format, vw_filename, preprocessor, options, labels, weight_train, columnspec, ignoreheader)
+        if format == 'vw':
+            vw_filename = source
+            # XXX preprocessor can make sense too
+            assert not preprocessor, 'TODO'
+        else:
+            vw_filename = get_temp_filename('vw_filename')
+            convert_any_to_vw(
+                source,
+                format,
+                vw_filename,
+                labels,
+                weight_train,
+                columnspec,
+                ignoreheader,
+                preprocessor=preprocessor,
+                workers=options.workers)
+
+        folds, total = split_file(vw_filename, nfolds=options.nfolds)
+        for fname in folds:
+            assert os.path.exists(fname), fname
 
         vw_args = [x for x in my_args if x not in PREPROCESSING_BINARY_OPTS]
 
@@ -1536,8 +1520,8 @@ def main_tune(options, source, format, vw_filename, args, preprocessor_base, lab
                 is_binary,
                 weight_metric,
                 options.threshold,
-                predictions_filename=options.cv_predictions,
-                raw_predictions_filename=options.cv_raw_predictions,
+                predictions_filename=options.predictions,
+                raw_predictions_filename=options.raw_predictions,
                 workers=options.workers,
                 other_metrics=other_metrics)
         finally:
@@ -1569,10 +1553,7 @@ def main():
 
     # cross-validation and parameter tuning options
     parser.add_option('--cv', action='store_true')
-    parser.add_option('--cv_predictions')
-    parser.add_option('--cv_raw_predictions')
-    parser.add_option('--cv_audit')
-    parser.add_option('--cv_errors', action='store_true')
+    parser.add_option('--cv_errors', action='store_true')  # XXX merge with --toperrors
     parser.add_option('--workers', type=int)
     parser.add_option('--nfolds', type=int)
     parser.add_option('--metric', action='append')
@@ -1594,6 +1575,8 @@ def main():
     for opt in Preprocessor.ALL_OPTIONS:
         parser.add_option('--%s' % opt, action='store_true')
     parser.add_option('--columnspec', default='y,text')
+
+    # should be 'count'
     parser.add_option('--ignoreheader', action='store_true')
 
     # using preprocessor standalone:
@@ -1627,7 +1610,7 @@ def main():
     used_stdin = False
     if options.data in (None, '/dev/stdin', '-'):
         if options.data is None:
-            log('Reading from stdin...', log_level=1)
+            log('Reading examples from stdin...', log_level=1)
 
         used_stdin = True
         from StringIO import StringIO
@@ -1747,14 +1730,6 @@ def main():
 
     preprocessor = Preprocessor.from_options(options.__dict__)
 
-    if format == 'vw':
-        assert not preprocessor or not preprocessor.to_options(), preprocessor
-        vw_filename = filename
-    else:
-        vw_filename = get_temp_filename('vw')
-        to_cleanup.append(vw_filename)
-
-    folds = []
     need_tuning = 0
 
     index = 0
@@ -1770,77 +1745,95 @@ def main():
                 args[index:index + 2] = [get_tuning_config(arg + ' ' + next_arg)]
         index += 1
 
-    try:
+    if need_tuning:
+        final_options, preprocessor = main_tune(options, source or filename, format, args, preprocessor, labels,
+                                                options.weight_metric, options.weight_train, options.columnspec, options.ignoreheader, is_binary=n_classes is None)
+    else:
+        final_options = ' '.join(args)
 
-        if need_tuning:
-            final_options, preprocessor = main_tune(options, source or filename, format, vw_filename, args, preprocessor, labels,
-                                                    options.weight_metric, options.weight_train, options.columnspec, options.ignoreheader, is_binary=n_classes is None)
-            # XXX must leave vw_filename preprocessed with correct preprocessor!
-            # XXX also need --cv_predictions / --cv_errors to work. simply do cv afterwards?
+    if format == 'vw':
+        assert not preprocessor or not preprocessor.to_options(), preprocessor
+        vw_source = source or filename
+    else:
+        vw_filename = get_temp_filename('vw')
+        to_cleanup.append(vw_filename)
 
-        else:
-            final_options = ' '.join(args)
+        convert_any_to_vw(
+            source or filename,
+            format,
+            vw_filename,
+            labels,
+            options.weight_train,
+            options.columnspec,
+            options.ignoreheader,
+            preprocessor=preprocessor,
+            workers=options.workers)
 
-            if format != 'vw':
-                convert_any_to_vw(
-                    source or filename,
-                    format,
-                    vw_filename,
-                    labels,
-                    options.weight_train,
-                    options.columnspec,
-                    options.ignoreheader,
-                    preprocessor=preprocessor,
-                    workers=options.workers)
+        vw_source = vw_filename
 
-            if options.cv:
-                folds, total_lines = split_file(vw_filename, nfolds=options.nfolds)
+    if options.cv:
+        try:
+            folds, total_lines = split_file(vw_source, nfolds=options.nfolds)
 
-                assert len(folds) >= 2, folds
+            assert len(folds) >= 2, folds
 
-                cv_predictions = options.cv_predictions
-                if not cv_predictions:
-                    cv_predictions = get_temp_filename('cvpred')
-                    to_cleanup.append(cv_predictions)
+            cv_predictions = options.predictions
+            if not cv_predictions:
+                cv_predictions = get_temp_filename('cvpred')
+                to_cleanup.append(cv_predictions)
 
-                cv_pred = vw_cross_validation(
-                    folds,
-                    final_options,
-                    workers=options.workers,
-                    p_fname=cv_predictions,
-                    r_fname=options.cv_raw_predictions,
-                    audit=options.cv_audit)
+            cv_pred = vw_cross_validation(
+                folds,
+                final_options,
+                workers=options.workers,
+                p_fname=cv_predictions,
+                r_fname=options.raw_predictions,
+                audit=options.audit)
 
-                if options.metric:
-                    report('cv ', vw_filename, cv_pred, options.metric, n_classes, options.weight_metric, options.threshold)
+            if options.metric:
+                y_true_sample_weight = get_sample_weight(y_true, options.weight_metric)
 
-    finally:
-        unlink(*folds)
+                for metric in options.metric:
+                    value = calculate_score(metric, y_true, cv_pred, y_true_sample_weight, is_binary=n_classes is None, threshold=options.threshold)
+                    print 'cv %s: %g' % (metric, value)
+
+        finally:
+            unlink(*folds)
 
     if options.final_regressor or not (options.cv or need_tuning):
-        vw_cmd = 'vw %s -d %s' % (final_options, vw_filename)
+        vw_cmd = 'vw %s' % final_options
+
+        if isinstance(vw_source, basestring):
+            assert os.path.exists(vw_source), vw_source
+            vw_cmd += ' -d %s' % (vw_source, )
+            vw_stdin = None
+        else:
+            vw_stdin = vw_source.getvalue()
+
         if options.final_regressor:
             # vw sometimes does not build model but does not signal error with returncode either
             vw_cmd += ' -f %s' % options.final_regressor
 
-        predictions_fname = options.predictions
+        if not options.cv:
+            predictions_fname = options.predictions
 
-        if options.metric:
-            if not predictions_fname:
-                predictions_fname = get_temp_filename('pred')
+            if options.metric:
+                if not predictions_fname:
+                    predictions_fname = get_temp_filename('pred')
+                    to_cleanup.append(predictions_fname)
 
-        if predictions_fname:
-            vw_cmd += ' -p %s' % predictions_fname
+            if predictions_fname and not options.cv:
+                vw_cmd += ' -p %s' % predictions_fname
 
-        if options.raw_predictions:
-            vw_cmd += ' -r %s' % options.raw_predictions
+            if options.raw_predictions:
+                vw_cmd += ' -r %s' % options.raw_predictions
 
-        if options.audit:
-            vw_cmd += ' -a'
+            if options.audit:
+                vw_cmd += ' -a'
 
-        system(vw_cmd, log_level=0)
+        system(vw_cmd, log_level=0, stdin=vw_stdin)
 
-        if options.metric:
+        if options.metric and not options.cv:
             y_pred = np.array(_load_first_float_from_each_string(predictions_fname))
             sample_weight = get_sample_weight(y_true, options.weight_metric)
 
@@ -1850,7 +1843,7 @@ def main():
         if options.toperrors:
             errors = []
 
-            if hasattr(source, 'seek'):
+            if hasattr(vw_source, 'seek'):
                 source.seek(0)
 
             for yp, yt, example in zip(y_pred, y_true, open_anything(source or filename, format)):
