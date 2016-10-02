@@ -244,18 +244,25 @@ class PassThroughOptionParser(optparse.OptionParser):
                 largs.append(e.opt_str)
 
 
-def system(cmd, log_level=0):
+def system(cmd, log_level=0, stdin=None):
     sys.stdout.flush()
     start = time.time()
     log('+ %s' % cmd, log_level=log_level)
-    retcode = os.system(cmd)
+
+    if stdin is not None:
+        popen = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE)
+        popen.communicate(stdin)
+        retcode = popen.wait()
+    else:
+        retcode = os.system(cmd)
+
     if retcode:
         log('%s [%.1fs] %s', '-' if retcode == 0 else '!', time.time() - start, cmd, log_level=log_level - 1)
     if retcode:
         sys.exit(1)
 
 
-def split_file(source, nfolds=None, ignoreheader=False):
+def split_file(source, nfolds=None, ignoreheader=False, log_level=0):
     if nfolds is None:
         nfolds = 10
 
@@ -282,7 +289,10 @@ def split_file(source, nfolds=None, ignoreheader=False):
 
     foldsize = int(math.ceil(total_lines / float(nfolds)))
     foldsize = max(foldsize, 1)
+    orig_nfolds = nfolds
     nfolds = int(math.ceil(total_lines / float(foldsize)))
+    if nfolds != orig_nfolds:
+        log('Reduced number of folds from %r to %r', orig_nfolds, nfolds, log_level=1 + log_level)
     folds = []
 
     current_fold = -1
@@ -1351,7 +1361,7 @@ def convert_any_to_vw(source, format, output_filename, labels, weights, columnsp
             preprocessor_opts.extend(preprocessor)
 
     workers = _workers(workers)
-    batches, total_lines = split_file(source, nfolds=workers, ignoreheader=ignoreheader)
+    batches, total_lines = split_file(source, nfolds=workers, ignoreheader=ignoreheader, log_level=-1)
 
     batches_out = [x + '.out' for x in batches]
 
