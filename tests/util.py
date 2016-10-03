@@ -36,6 +36,7 @@ class TestCase(unittest.TestCase):
 
     def setUp(self):
         cleanup_tmp()
+        system('rm -fr .vwoptimize')
         os.mkdir('tmp')
 
     def assert_command_output(self, cmd, expected_output):
