@@ -31,6 +31,7 @@ class TestCase(unittest.TestCase):
     maxDiff = 20000
 
     def tearDown(self):
+        self.assertEqual(os.popen('ls .vwoptimize').read(), '')
         cleanup_tmp()
 
     def setUp(self):
