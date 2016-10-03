@@ -1801,6 +1801,12 @@ def main():
         finally:
             unlink(*folds)
 
+    if options.cv:
+        # all of these are related to CV if --cv is enabled
+        options.predictions = None
+        options.raw_predictions = None
+        options.audit = None
+
     if options.final_regressor or not (options.cv or need_tuning):
         vw_cmd = 'vw %s' % final_options
 
