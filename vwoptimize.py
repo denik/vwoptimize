@@ -1587,7 +1587,7 @@ def main():
 
     # using as perf
     parser.add_option('--report', action='store_true')
-    parser.add_option('--toperrors', action='store_true')
+    parser.add_option('--toperrors')
     parser.add_option('--threshold', default=0.0, type=float)
 
     # logging and debugging and misc
@@ -1821,26 +1821,27 @@ def main():
             # vw sometimes does not build model but does not signal error with returncode either
             vw_cmd += ' -f %s' % options.final_regressor
 
-        if not options.cv:
-            predictions_fname = options.predictions
+        predictions_fname = options.predictions
 
-            if options.metric:
-                if not predictions_fname:
-                    predictions_fname = get_temp_filename('pred')
-                    to_cleanup.append(predictions_fname)
+        if options.metric or options.toperrors:
+            if not predictions_fname:
+                predictions_fname = get_temp_filename('pred')
+                to_cleanup.append(predictions_fname)
 
-            if predictions_fname and not options.cv:
-                vw_cmd += ' -p %s' % predictions_fname
+        if predictions_fname:
+            vw_cmd += ' -p %s' % predictions_fname
 
-            if options.raw_predictions:
-                vw_cmd += ' -r %s' % options.raw_predictions
+        if options.raw_predictions:
+            vw_cmd += ' -r %s' % options.raw_predictions
 
-            if options.audit:
-                vw_cmd += ' -a'
+        if options.audit:
+            vw_cmd += ' -a'
 
         system(vw_cmd, log_level=0, stdin=vw_stdin)
 
-        if options.metric and not options.cv:
+        y_pred = None
+
+        if options.metric and predictions_fname:
             y_pred = np.array(_load_first_float_from_each_string(predictions_fname))
             sample_weight = get_sample_weight(y_true, options.weight_metric)
 
@@ -1848,21 +1849,32 @@ def main():
                 print '%s: %g' % (metric, calculate_score(metric, y_true, y_pred, sample_weight, is_binary=n_classes is None, threshold=options.threshold))
 
         if options.toperrors:
+            if y_pred is None:
+                y_pred = np.array(_load_first_float_from_each_string(predictions_fname))
+
             errors = []
 
-            if hasattr(vw_source, 'seek'):
-                source.seek(0)
-
             for yp, yt, example in zip(y_pred, y_true, open_anything(source or filename, format)):
-                errors.append((abs(yp - yt), yp, example))
+                # add hash of the example as a second item so that we get a mix of false positives and false negatives for a given error level
+                errors.append((abs(yp - yt), hash(repr(example)), yp, example))
 
             errors.sort(reverse=True)
+
+            if '.' in options.toperrors:
+                threshold = float(options.toperrors)
+                errors = [x for x in errors if x[0] >= threshold]
+            else:
+                count = int(options.toperrors)
+                errors = errors[:count]
+
             output = csv.writer(sys.stdout)
 
-            for err, yp, example in errors:
-                row = [err]
+            for err, _hash, yp, example in errors:
+                row = [yp]
                 if isinstance(example, list):
                     row.extend(example)
+                else:
+                    row.append(str(example))
                 output.writerow(row)
 
         sys.exit(0)
