@@ -407,6 +407,7 @@ def vw_cross_validation(folds, vw_args, workers=None, p_fname=None, r_fname=None
 
         model_filename = get_temp_filename('model')
         assert not os.path.exists(model_filename), 'internal error: temporary file already exists: %r' % model_filename
+        models.append(model_filename)
 
         p_filename = '%s.predictions' % model_filename
         with_p = '-p %s' % p_filename
