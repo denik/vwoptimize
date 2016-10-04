@@ -1603,7 +1603,7 @@ def parseaudit(source):
             print item
 
 
-def main():
+def main(to_cleanup):
     parser = PassThroughOptionParser()
 
     # cross-validation and parameter tuning options
@@ -1765,7 +1765,6 @@ def main():
             workers=options.workers)
         sys.exit(0)
 
-    to_cleanup = []
     options.metric = _make_proper_list(options.metric)
 
     if options.report:
@@ -1959,4 +1958,8 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    to_cleanup = []
+    try:
+        main(to_cleanup)
+    finally:
+        unlink(*to_cleanup)
