@@ -10,6 +10,8 @@ import re
 import subprocess
 import time
 import heapq
+import json
+import pprint
 from pipes import quote
 import numpy as np
 
@@ -791,10 +793,12 @@ def get_tuning_config(config):
     return type(**params)
 
 
-def vw_optimize_over_cv(vw_filename, folds, args, metric, is_binary, weight_metric, threshold,
+def vw_optimize_over_cv(vw_filename, folds, args, metric, config,
                         predictions_filename=None, raw_predictions_filename=None, workers=None, other_metrics=[]):
     # we only depend on scipy if parameter tuning is enabled
     import scipy.optimize
+
+    # predictions_filename is unused currently
 
     gridsearch_params = []
     tunable_params = []
@@ -824,7 +828,6 @@ def vw_optimize_over_cv(vw_filename, folds, args, metric, is_binary, weight_metr
 
     y_true = _load_first_float_from_each_string(vw_filename)
     y_true = np.array(y_true)
-    sample_weight = get_sample_weight(y_true, weight_metric)
 
     def run(params):
         log('Parameters: %r', params)
@@ -860,7 +863,7 @@ def vw_optimize_over_cv(vw_filename, folds, args, metric, is_binary, weight_metr
         y_pred = _load_first_float_from_each_string(predictions_filename_tmp)
         y_pred = np.array(y_pred)
         assert len(y_true) == len(y_pred), (vw_filename, len(y_true), predictions_filename_tmp, len(y_pred), os.getpid())
-        result = calculate_score(metric, y_true, y_pred, sample_weight, is_binary, threshold)
+        result = calculate_score(metric, y_true, y_pred, config)
 
         if metric.replace('_w', '') in 'acc auc f1 precision recall'.split():
             result = -result
@@ -884,7 +887,7 @@ def vw_optimize_over_cv(vw_filename, folds, args, metric, is_binary, weight_metr
                 return '%.4f' % x
             return str(x)
 
-        other_results = ' '.join(['%s=%s' % (m, frmt(calculate_score(m, y_true, y_pred, sample_weight, is_binary, threshold))) for m in other_metrics])
+        other_results = ' '.join(['%s=%s' % (m, frmt(calculate_score(m, y_true, y_pred, config))) for m in other_metrics])
         if other_results:
             other_results = '  ' + other_results
 
@@ -1054,6 +1057,9 @@ class Preprocessor(object):
             self.lowercase = True
             self.strip_punct = True
 
+    def __str__(self):
+        return ' '.join(self.to_options())
+
     def __repr__(self):
         return '%s(%s)' % (type(self).__name__, ', '.join('%s=%r' % (name, getattr(self, name, None)) for name in self.ALL_OPTIONS))
 
@@ -1095,11 +1101,9 @@ class Preprocessor(object):
         return [self.process_row(row) for row in rows]
 
 
-def read_labels(filename, source, format, n_classes, columnspec, ignoreheader):
+def read_labels(filename, source, format, n_classes, label_index, ignoreheader):
     labels_counts = {}
     examples_count = 0
-
-    label_index = columnspec.index('y')
 
     log('Reading labels from %s', filename or source)
     rows_source = open_anything(filename or source, format)
@@ -1350,20 +1354,17 @@ def _convert_any_to_vw(source, format, output, labels, weights, preprocessor, co
     output.close()
 
 
-def convert_any_to_vw(source, format, output_filename, labels, weights, columnspec, ignoreheader, preprocessor=None, workers=None):
+def convert_any_to_vw(source, format, output_filename, preprocessor, config, ignoreheader, workers=None):
     assert format != 'vw'
+    labels = config.get('labels')
+    weights = config.get('weight_train')
+    columnspec = config.get('columnspec')
+
+    preprocessor = preprocessor or ''
+
+    assert isinstance(preprocessor, basestring), preprocessor
 
     start = time.time()
-
-    preprocessor_opts = []
-    if preprocessor:
-        if hasattr(preprocessor, 'to_options'):
-            preprocessor_opts.extend(preprocessor.to_options())
-        elif isinstance(preprocessor, basestring):
-            assert '--' in preprocessor, preprocessor
-            preprocessor_opts.extend(preprocessor.split())
-        else:
-            preprocessor_opts.extend(preprocessor)
 
     workers = _workers(workers)
     batches, total_lines = split_file(source, nfolds=workers, ignoreheader=ignoreheader, log_level=-1)
@@ -1388,7 +1389,7 @@ def convert_any_to_vw(source, format, output_filename, labels, weights, columnsp
         if columnspec:
             common_cmd += ['--columnspec', quote(','.join(str(x) for x in columnspec))]
 
-        common_cmd.extend(preprocessor_opts)
+        common_cmd.append(preprocessor)
 
         for batch in batches:
             cmd = common_cmd + ['--tovw_simple', batch + '.out', '-d', batch]
@@ -1427,7 +1428,18 @@ metrics_on_label = {
 }
 
 
-def calculate_score(metric, y_true, y_pred, sample_weight, is_binary, threshold, thresholds_used=set()):
+def calculate_score(metric, y_true, y_pred, config):
+    sample_weight = get_sample_weight(y_true, config.get('weight_metric'))
+
+    n_classes = config.get('n_classes')
+    threshold = config.get('threshold')
+
+    if n_classes is None and threshold is None:
+        sys.exit('Bad config: missing n_classes and threshold:\n%s' % pprint.pformat(config))
+
+    if n_classes is not None and threshold is not None:
+        sys.exit('Bad config: both n_classes and threshold are present, expected only one:\n%s' % pprint.pformat(config))
+
     extra_args = {'sample_weight': sample_weight}
     if metric.endswith('_w'):
         metric = metric[:-2]
@@ -1437,18 +1449,13 @@ def calculate_score(metric, y_true, y_pred, sample_weight, is_binary, threshold,
     import sklearn.metrics
     if metric in metrics_on_score:
         fullname = metrics_on_score[metric]
-        assert is_binary, 'Cannot apply %s/%s on multiclass' % (metric, fullname)
+        assert threshold is not None, 'Cannot apply %s/%s on multiclass' % (metric, fullname)
         func = getattr(sklearn.metrics, fullname)
         return func(y_true, y_pred, **extra_args)
     elif metric in metrics_on_label:
         fullname = metrics_on_label[metric]
         func = getattr(sklearn.metrics, fullname)
-        if is_binary:
-            if threshold is None:
-                threshold = (min(y_true) + max(y_true)) / 2.0
-            if threshold not in thresholds_used:
-                thresholds_used.add(threshold)
-                log('Using threshold: %g', threshold, log_level=1)
+        if threshold is not None:
             y_true_norm = y_true > threshold
             y_pred_norm = y_pred > threshold
             return func(y_true_norm, y_pred_norm, **extra_args)
@@ -1458,18 +1465,17 @@ def calculate_score(metric, y_true, y_pred, sample_weight, is_binary, threshold,
         sys.exit('Cannot calculate metric: %r' % metric)
 
 
-def main_tune(options, source, format, args, preprocessor_base, labels, weight_metric, weight_train, columnspec, ignoreheader, is_binary):
+def main_tune(metric, config, source, format, args, preprocessor_base, nfolds, ignoreheader, workers):
     if preprocessor_base is None:
         preprocessor_base = []
     else:
         preprocessor_base = preprocessor_base.to_options()
 
-    if not options.metric:
+    if not metric:
         sys.exit('Provide metric to optimize for with --metric auc|acc|mse|f1')
 
-    optimization_metric = options.metric[0]
-    other_metrics = options.metric[1:]
-    assert not options.audit, '-a incompatible with parameter tuning'
+    optimization_metric = metric[0]
+    other_metrics = metric[1:]
 
     best_preprocessor_opts = None
     best_vw_options = None
@@ -1477,13 +1483,14 @@ def main_tune(options, source, format, args, preprocessor_base, labels, weight_m
     already_done = {}
 
     preprocessor_variants = list(expand(args, only=PREPROCESSING_BINARY_OPTS))
-    log('Trying preprocessor variants: %r', preprocessor_variants)
+    log('Trying preprocessor variants: %s', pprint.pformat(preprocessor_variants), log_level=-1)
 
     for my_args in preprocessor_variants:
         preprocessor = Preprocessor.from_options(preprocessor_base + my_args)
         preprocessor_opts = ' '.join(preprocessor.to_options() if preprocessor else [])
-        if preprocessor_opts:
-            log('Trying preprocessor: %s', preprocessor_opts)
+
+        if len(preprocessor_variants) != 1 or preprocessor_opts:
+            log('vwoptimize preprocessor = %s', preprocessor_opts, log_level=1)
 
         previously_done = already_done.get(str(preprocessor))
 
@@ -1503,14 +1510,12 @@ def main_tune(options, source, format, args, preprocessor_base, labels, weight_m
                 source,
                 format,
                 vw_filename,
-                labels,
-                weight_train,
-                columnspec,
+                preprocessor_opts,
+                config,
                 ignoreheader,
-                preprocessor=preprocessor,
-                workers=options.workers)
+                workers=workers)
 
-        folds, total = split_file(vw_filename, nfolds=options.nfolds)
+        folds, total = split_file(vw_filename, nfolds)
         for fname in folds:
             assert os.path.exists(fname), fname
 
@@ -1522,12 +1527,8 @@ def main_tune(options, source, format, args, preprocessor_base, labels, weight_m
                 folds,
                 vw_args,
                 optimization_metric,
-                is_binary,
-                weight_metric,
-                options.threshold,
-                predictions_filename=options.predictions,
-                raw_predictions_filename=options.raw_predictions,
-                workers=options.workers,
+                config,
+                workers=workers,
                 other_metrics=other_metrics)
         finally:
             unlink(*folds)
@@ -1626,12 +1627,14 @@ def main(to_cleanup):
     parser.add_option('-f', '--final_regressor')
     parser.add_option('-d', '--data')
     parser.add_option('-a', '--audit', action='store_true')
+    parser.add_option('--readconfig')
+    parser.add_option('--writeconfig')
 
     # preprocessing options:
     parser.add_option('--labels')
     for opt in Preprocessor.ALL_OPTIONS:
         parser.add_option('--%s' % opt, action='store_true')
-    parser.add_option('--columnspec', default='y,text')
+    parser.add_option('--columnspec')
 
     # should be 'count'
     parser.add_option('--ignoreheader', action='store_true')
@@ -1644,7 +1647,7 @@ def main(to_cleanup):
     # using as perf
     parser.add_option('--report', action='store_true')
     parser.add_option('--toperrors')
-    parser.add_option('--threshold', default=0.0, type=float)
+    parser.add_option('--threshold', type=float)
 
     # logging and debugging and misc
     parser.add_option('--morelogs', action='count', default=0)
@@ -1662,14 +1665,6 @@ def main(to_cleanup):
         parseaudit(sys.stdin)
         sys.exit(0)
 
-    options.weight = parse_weight(options.weight, options.labels)
-    options.weight_train = parse_weight(options.weight_train, options.labels) or options.weight
-    options.weight_metric = parse_weight(options.weight_metric, options.labels) or options.weight
-    options.labels = _make_proper_list(options.labels)
-
-    if options.labels and len(options.labels) <= 1:
-        sys.exit('Expected comma-separated list of labels: --labels %r\n' % options.labels)
-
     used_stdin = False
     if options.data in (None, '/dev/stdin', '-'):
         if options.data is None:
@@ -1684,36 +1679,63 @@ def main(to_cleanup):
         source = None
         filename = options.data
 
-    options.columnspec = _make_proper_list(options.columnspec)
+    config = {}
+
+    if options.readconfig:
+        if os.path.exists(options.readconfig):
+            config = json.load(open(options.readconfig))
+            log('vwoptimize config = %s', options.readconfig, log_level=1)
+
+    labels = _make_proper_list(options.labels)
+
+    if labels and len(labels) <= 1:
+        sys.exit('Expected comma-separated list of labels: --labels %r\n' % options.labels)
+
+    if labels:
+        config['labels'] = labels
+
+    weight = parse_weight(options.weight, labels)
+    weight_train = parse_weight(options.weight_train, labels) or weight
+    weight_metric = parse_weight(options.weight_metric, labels) or weight
+
+    if weight_train:
+        config['weight_train'] = weight_train
+
+    if weight_metric:
+        config['weight_metric'] = weight_metric
+
+    if options.columnspec:
+        config['columnspec'] = _make_proper_list(options.columnspec)
+
+    preprocessor_from_options = Preprocessor.from_options(options.__dict__)
+
+    if preprocessor_from_options:
+        if config.get('preprocessor'):
+            log('Preprocessor specified in config (%s) and on command line (%s), going with the latter.', config['preprocessor'], preprocessor_from_options, log_level=2)
+        config['preprocessor'] = str(preprocessor_from_options)
+        preprocessor = preprocessor_from_options
+    elif config.get('preprocessor'):
+        preprocessor = Preprocessor.from_options(config['preprocessor'])
+    else:
+        preprocessor = None
 
     if options.tovw_simple:
         assert not options.workers or options.workers == 1, options.workers
         assert not options.ignoreheader
-        assert options.format and options.format in ('vw', 'csv', 'tsv')
-        assert options.weight_train != 'balanced', 'not supported here'
-        preprocessor = Preprocessor.from_options(options.__dict__)
+        assert options.format in ('vw', 'csv', 'tsv')
+        assert 'balaced' not in str(options.weight_train), '"balanced" not supported here: %r' % options.weight_train
         _convert_any_to_vw(
             source or filename,
             options.format,
             options.tovw_simple,
-            options.labels,
-            options.weight_train,
+            labels,
+            weight_train,
             preprocessor,
-            options.columnspec)
+            config.get('columnspec'))
         sys.exit(0)
 
-    if not options.cv:
-        for key, value in options.__dict__.items():
-            if value and key.startswith('cv_'):
-                options.cv = True
-                break
-
-    n_classes = None
-    vw_multiclass_opts = 'oaa|ect|csoaa|log_multi|recall_tree'
-
-    n_classes_cmdline = re.findall('--(?:%s)\s+(\d+)' % vw_multiclass_opts, ' '.join(args))
-    if n_classes_cmdline:
-        n_classes = max(int(x) for x in n_classes_cmdline)
+    if options.threshold is not None:
+        config['threshold'] = options.threshold
 
     format = options.format
 
@@ -1723,48 +1745,50 @@ def main(to_cleanup):
     if not format:
         format = guess_format(filename or source)
 
-    if options.labels:
-        orig_labels = options.labels
-        if len(options.labels) <= 1:
-            sys.exit('Expected comma-separated list of labels: --labels %r\n' % orig_labels)
-        if n_classes == 0:
-            n_classes = len(options.labels)
-    else:
-        labels_counts, y_true, labels, n_classes = read_labels(filename, source, format, n_classes, options.columnspec, options.ignoreheader)
-        options.labels = labels
+    vw_multiclass_opts = 'oaa|ect|csoaa|log_multi|recall_tree'
 
-    labels = options.labels
+    n_classes_cmdline = re.findall('--(?:%s)\s+(\d+)' % vw_multiclass_opts, ' '.join(args))
+    if n_classes_cmdline:
+        config['n_classes'] = max(int(x) for x in n_classes_cmdline)
 
-    if n_classes:
-        args = re.sub('(--(?:%s)\s+)(0)' % vw_multiclass_opts, '\\g<1>' + str(n_classes), ' '.join(args)).split()
+    labels_counts = None
+    y_true = None
 
-    balanced_weights = None
-
-    if options.weight_train == ['balanced']:
-        options.weight_train = balanced_weights = get_balanced_weights(labels_counts)
-
-    if options.weight_metric == ['balanced']:
-        options.weight_metric = balanced_weights or get_balanced_weights(labels_counts)
-
-    if options.weight_metric:
-        if labels:
-            options.weight_metric = dict((labels.index(key) + 1, weight) for (key, weight) in options.weight_metric.items())
+    if 'labels' not in config:
+        if format == 'vw':
+            label_index = 0
         else:
-            options.weight_metric = dict((float(key), weight) for (key, weight) in options.weight_metric.items())
+            if 'columnspec' not in config:
+                config['columnspec'] = ['y', 'text']
+            label_index = config['columnspec'].index('y')
+        labels_counts, y_true, config['labels'], config['n_classes'] = read_labels(filename, source, format, config.get('n_classes'), label_index, options.ignoreheader)
+        if config['n_classes'] is None:
+            config['threshold'] = (max(y_true) + min(y_true)) / 2.0
+
+    if config['n_classes']:
+        args = re.sub('(--(?:%s)\s+)(0)' % vw_multiclass_opts, '\\g<1>' + str(config['n_classes']), ' '.join(args)).split()
+
+    if config.get('weight_train') == ['balanced']:
+        config['weight_train'] = balanced_weights = get_balanced_weights(labels_counts)
+
+    if config.get('weight_metric') == ['balanced']:
+        config['weight_metric'] = balanced_weights or get_balanced_weights(labels_counts)
+
+    if config.get('weight_metric'):
+        if config.get('labels'):
+            config['weight_metric'] = dict((config['labels'].index(key) + 1, weight) for (key, weight) in config['weight_metric'].items())
+        else:
+            config['weight_metric'] = dict((float(key), weight) for (key, weight) in config['weight_metric'].items())
 
     if options.tovw:
-        preprocessor = Preprocessor.from_options(options.__dict__)
-
         assert format != 'vw', 'Input should be csv or tsv'  # XXX
         convert_any_to_vw(
             source or filename,
             format,
             options.tovw,
-            labels,
-            options.weight_train,
-            options.columnspec,
+            config.get('preprocessor'),
+            config,
             options.ignoreheader,
-            preprocessor,
             workers=options.workers)
         sys.exit(0)
 
@@ -1783,14 +1807,11 @@ def main(to_cleanup):
             sys.exit('Must provide -p')
 
         y_pred = np.array(_load_first_float_from_each_string(predictions))
-        sample_weight = get_sample_weight(y_true, options.weight_metric)
 
         for metric in options.metric:
-            print '%s: %g' % (metric, calculate_score(metric, y_true, y_pred, sample_weight, is_binary=n_classes is None, threshold=options.threshold))
+            print '%s: %g' % (metric, calculate_score(metric, y_true, y_pred, config))
 
         sys.exit(0)
-
-    preprocessor = Preprocessor.from_options(options.__dict__)
 
     need_tuning = 0
 
@@ -1808,10 +1829,20 @@ def main(to_cleanup):
         index += 1
 
     if need_tuning:
-        final_options, preprocessor = main_tune(options, source or filename, format, args, preprocessor, labels,
-                                                options.weight_metric, options.weight_train, options.columnspec, options.ignoreheader, is_binary=n_classes is None)
+        assert not options.audit, '-a incompatible with parameter tuning'
+        config['vw_options'], preprocessor = main_tune(
+            metric=options.metric,
+            config=config,
+            source=source or filename,
+            format=format,
+            args=args,
+            preprocessor_base=preprocessor,
+            nfolds=options.nfolds,
+            ignoreheader=options.ignoreheader,
+            workers=options.workers)
+        config['preprocessor'] = str(preprocessor)
     else:
-        final_options = ' '.join(args)
+        config['vw_options'] = ' '.join(args)
 
     if format == 'vw':
         assert not preprocessor or not preprocessor.to_options(), preprocessor
@@ -1824,16 +1855,15 @@ def main(to_cleanup):
             source or filename,
             format,
             vw_filename,
-            labels,
-            options.weight_train,
-            options.columnspec,
+            config['preprocessor'],
+            config,
             options.ignoreheader,
-            preprocessor=preprocessor,
             workers=options.workers)
 
         vw_source = vw_filename
 
     if options.cv:
+        # XXX we could skip --cv here if we make main_tune() keep final predictions and raw_predictions for us
         try:
             folds, total_lines = split_file(vw_source, nfolds=options.nfolds)
 
@@ -1846,17 +1876,15 @@ def main(to_cleanup):
 
             cv_pred = vw_cross_validation(
                 folds,
-                final_options,
+                config['vw_options'],
                 workers=options.workers,
                 p_fname=cv_predictions,
                 r_fname=options.raw_predictions,
                 audit=options.audit)
 
             if options.metric:
-                y_true_sample_weight = get_sample_weight(y_true, options.weight_metric)
-
                 for metric in options.metric:
-                    value = calculate_score(metric, y_true, cv_pred, y_true_sample_weight, is_binary=n_classes is None, threshold=options.threshold)
+                    value = calculate_score(metric, y_true, cv_pred, config)
                     print 'cv %s: %g' % (metric, value)
 
         finally:
@@ -1870,11 +1898,24 @@ def main(to_cleanup):
 
     final_regressor = options.final_regressor
 
+    config_tmp_filename = None
+    if final_regressor:
+        if options.writeconfig:
+            log('write config = %s', options.writeconfig, log_level=1)
+            config_tmp_filename = options.writeconfig + '.tmp'
+            to_cleanup.append(config_tmp_filename)
+            json.dump(config, open(config_tmp_filename, 'w'), sort_keys=True, indent=4)
+
     if not final_regressor and options.savefeatures:
         final_regressor = get_temp_filename('final_regressor')
 
-    if final_regressor or not (options.cv or need_tuning):
-        vw_cmd = 'vw %s' % final_options
+    final_regressor_tmp = None
+    if final_regressor:
+        final_regressor_tmp = final_regressor + '.tmp'
+        to_cleanup.append(final_regressor_tmp)
+
+    if final_regressor_tmp or not (options.cv or need_tuning):
+        vw_cmd = 'vw %s' % config['vw_options']
 
         if isinstance(vw_source, basestring):
             assert os.path.exists(vw_source), vw_source
@@ -1883,8 +1924,8 @@ def main(to_cleanup):
         else:
             vw_stdin = vw_source.getvalue()
 
-        if final_regressor:
-            vw_cmd += ' -f %s' % final_regressor
+        if final_regressor_tmp:
+            vw_cmd += ' -f %s' % final_regressor_tmp
 
         predictions_fname = options.predictions
 
@@ -1908,10 +1949,9 @@ def main(to_cleanup):
 
         if options.metric and predictions_fname:
             y_pred = np.array(_load_first_float_from_each_string(predictions_fname))
-            sample_weight = get_sample_weight(y_true, options.weight_metric)
 
             for metric in options.metric:
-                print '%s: %g' % (metric, calculate_score(metric, y_true, y_pred, sample_weight, is_binary=n_classes is None, threshold=options.threshold))
+                print '%s: %g' % (metric, calculate_score(metric, y_true, y_pred, config))
 
         if options.toperrors:
             if y_pred is None:
@@ -1942,6 +1982,12 @@ def main(to_cleanup):
                     row.append(str(example))
                 output.writerow(row)
 
+    if final_regressor_tmp:
+        os.rename(final_regressor_tmp, final_regressor)
+
+    if config_tmp_filename:
+        os.rename(config_tmp_filename, options.writeconfig)
+
     if options.savefeatures:
         vw_cmd = 'vw'
 
@@ -1952,6 +1998,7 @@ def main(to_cleanup):
         else:
             vw_stdin = vw_source.getvalue()
 
+        assert final_regressor
         vw_cmd += ' -i %s -t -a' % final_regressor
         to_cleanup.append(options.savefeatures + '.tmp')
         system(vw_cmd + ' | %s %s --parseaudit > %s.tmp' % (sys.executable, __file__, options.savefeatures))
