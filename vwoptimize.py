@@ -274,6 +274,9 @@ def split_file(source, nfolds=None, ignoreheader=False, log_level=0):
     else:
         ext = 'xxx'
 
+    if hasattr(source, 'seek'):
+        source.seek(0)
+
     # XXX already have examples_count
     total_lines = 0
     for line in open_regular_or_compressed(source):
