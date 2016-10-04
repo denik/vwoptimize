@@ -1311,8 +1311,6 @@ def _convert_any_to_vw(source, format, output, labels, weights, preprocessor, co
             else:
                 sys.exit('Spec item %r not understood' % spec)
 
-        assert y is not None, 'missing y'
-
         if info:
             info = " '%s" % ';'.join(info) + ' '
         else:
@@ -1327,7 +1325,10 @@ def _convert_any_to_vw(source, format, output, labels, weights, preprocessor, co
                     sys.exit(1)
                 continue
         else:
-            vw_y = y
+            if y is None:
+                vw_y = ''
+            else:
+                vw_y = y
 
         if weights is not None:
             weight = weights.get(y, 1)
@@ -1665,6 +1666,12 @@ def main(to_cleanup):
         parseaudit(sys.stdin)
         sys.exit(0)
 
+    config = {}
+
+    if options.readconfig:
+        config = json.load(open(options.readconfig))
+        log('vwoptimize config = %s', options.readconfig, log_level=1)
+
     used_stdin = False
     if options.data in (None, '/dev/stdin', '-'):
         if options.data is None:
@@ -1678,13 +1685,6 @@ def main(to_cleanup):
     else:
         source = None
         filename = options.data
-
-    config = {}
-
-    if options.readconfig:
-        if os.path.exists(options.readconfig):
-            config = json.load(open(options.readconfig))
-            log('vwoptimize config = %s', options.readconfig, log_level=1)
 
     labels = _make_proper_list(options.labels)
 
@@ -1760,12 +1760,16 @@ def main(to_cleanup):
         else:
             if 'columnspec' not in config:
                 config['columnspec'] = ['y', 'text']
-            label_index = config['columnspec'].index('y')
-        labels_counts, y_true, config['labels'], config['n_classes'] = read_labels(filename, source, format, config.get('n_classes'), label_index, options.ignoreheader)
-        if config['n_classes'] is None:
-            config['threshold'] = (max(y_true) + min(y_true)) / 2.0
+            try:
+                label_index = config['columnspec'].index('y')
+            except ValueError:
+                label_index = None
+        if label_index is not None:
+            labels_counts, y_true, config['labels'], config['n_classes'] = read_labels(filename, source, format, config.get('n_classes'), label_index, options.ignoreheader)
+            if config['n_classes'] is None:
+                config['threshold'] = (max(y_true) + min(y_true)) / 2.0
 
-    if config['n_classes']:
+    if config.get('n_classes'):
         args = re.sub('(--(?:%s)\s+)(0)' % vw_multiclass_opts, '\\g<1>' + str(config['n_classes']), ' '.join(args)).split()
 
     if config.get('weight_train') == ['balanced']:
@@ -1855,7 +1859,7 @@ def main(to_cleanup):
             source or filename,
             format,
             vw_filename,
-            config['preprocessor'],
+            config.get('preprocessor'),
             config,
             options.ignoreheader,
             workers=options.workers)
