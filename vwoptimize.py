@@ -265,7 +265,7 @@ def system(cmd, log_level=0, stdin=None):
         sys.exit(1)
 
 
-def split_file(source, nfolds=None, ignoreheader=False, log_level=0):
+def split_file(source, nfolds=None, ignoreheader=False, log_level=0, minfolds=1):
     if nfolds is None:
         nfolds = 10
 
@@ -300,7 +300,7 @@ def split_file(source, nfolds=None, ignoreheader=False, log_level=0):
     if nfolds != orig_nfolds:
         log('Reduced number of folds from %r to %r', orig_nfolds, nfolds, log_level=1 + log_level)
 
-    if nfolds <= 1:
+    if minfolds is not None and nfolds <= minfolds:
         sys.exit('Too few folds: %r' % nfolds)
 
     folds = []
@@ -1367,7 +1367,7 @@ def convert_any_to_vw(source, format, output_filename, preprocessor, config, ign
     start = time.time()
 
     workers = _workers(workers)
-    batches, total_lines = split_file(source, nfolds=workers, ignoreheader=ignoreheader, log_level=-1)
+    batches, total_lines = split_file(source, nfolds=workers, ignoreheader=ignoreheader, log_level=-1, minfolds=None)
 
     batches_out = [x + '.out' for x in batches]
 
