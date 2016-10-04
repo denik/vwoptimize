@@ -1902,6 +1902,7 @@ def main(to_cleanup):
     if final_regressor:
         if options.writeconfig:
             log('write config = %s', options.writeconfig, log_level=1)
+            assert options.writeconfig != options.final_regressor, options.writeconfig
             config_tmp_filename = options.writeconfig + '.tmp'
             to_cleanup.append(config_tmp_filename)
             json.dump(config, open(config_tmp_filename, 'w'), sort_keys=True, indent=4)
