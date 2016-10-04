@@ -1608,7 +1608,6 @@ def main():
 
     # cross-validation and parameter tuning options
     parser.add_option('--cv', action='store_true')
-    parser.add_option('--cv_errors', action='store_true')  # XXX merge with --toperrors
     parser.add_option('--workers', type=int)
     parser.add_option('--nfolds', type=int)
     parser.add_option('--metric', action='append')
