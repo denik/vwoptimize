@@ -1923,8 +1923,8 @@ def main(to_cleanup):
             errors.sort(reverse=True)
 
             if '.' in options.toperrors:
-                threshold = float(options.toperrors)
-                errors = [x for x in errors if x[0] >= threshold]
+                min_error = float(options.toperrors)
+                errors = [x for x in errors if x[0] >= min_error]
             else:
                 count = int(options.toperrors)
                 errors = errors[:count]
