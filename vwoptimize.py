@@ -9,6 +9,7 @@ import csv
 import re
 import subprocess
 import time
+import heapq
 from pipes import quote
 import numpy as np
 
@@ -1549,6 +1550,59 @@ def main_tune(options, source, format, args, preprocessor_base, labels, weight_m
     return best_vw_options, preprocessor
 
 
+def format_item(counts, weight, hash, ignore_single=None):
+    if ignore_single:
+        top_items = [(v, k) for (k, v) in counts[hash].items() if v > 1]
+    else:
+        top_items = [(v, k) for (k, v) in counts[hash].items()]
+    if not top_items:
+        return
+    top_items.sort(reverse=True)
+    top_items = ', '.join('%s %s' % (k, v) for (v, k) in top_items)
+    return '%g %s' % (weight, top_items)
+
+
+def parseaudit(source):
+    weights = {}
+    counts = {}  # hash -> text -> count
+    heap = []
+    line = None
+
+    while True:
+        line = source.readline()
+        if not line:
+            break
+        line = line.rstrip()
+        if not line.startswith('\t'):
+            continue
+
+        for feature in set(line.strip().split()):
+            text, hash, value, weight = feature.split(':')[:4]
+            weight = weight.split('@')[0]
+            weight = float(weight)
+            value = float(value)
+            assert value == 1, value
+            if not weight:
+                continue
+
+            c = counts.setdefault(hash, {})
+            c.setdefault(text, 0)
+            c[text] += 1
+
+            if hash in weights:
+                assert weights.get(hash) == weight, (hash, text, weight, weights.get(hash))
+                continue
+
+            weights[hash] = weight
+            heapq.heappush(heap, (-weight, hash))
+
+    while heap:
+        w, hash = heapq.heappop(heap)
+        item = format_item(counts, -w, hash)
+        if item:
+            print item
+
+
 def main():
     parser = PassThroughOptionParser()
 
@@ -1594,11 +1648,17 @@ def main():
     parser.add_option('--morelogs', action='count', default=0)
     parser.add_option('--lesslogs', action='count', default=0)
     parser.add_option('--keeptmp', action='store_true')
+    parser.add_option('--savefeatures')
+    parser.add_option('--parseaudit', action='store_true')
 
     options, args = parser.parse_args()
 
     globals()['LOG_LEVEL'] += options.lesslogs - options.morelogs
     globals()['KEEPTMP'] = options.keeptmp
+
+    if options.parseaudit:
+        parseaudit(sys.stdin)
+        sys.exit(0)
 
     options.weight = parse_weight(options.weight, options.labels)
     options.weight_train = parse_weight(options.weight_train, options.labels) or options.weight
@@ -1807,7 +1867,12 @@ def main():
         options.raw_predictions = None
         options.audit = None
 
-    if options.final_regressor or not (options.cv or need_tuning):
+    final_regressor = options.final_regressor
+
+    if not final_regressor and options.savefeatures:
+        final_regressor = get_temp_filename('final_regressor')
+
+    if final_regressor or not (options.cv or need_tuning):
         vw_cmd = 'vw %s' % final_options
 
         if isinstance(vw_source, basestring):
@@ -1817,9 +1882,8 @@ def main():
         else:
             vw_stdin = vw_source.getvalue()
 
-        if options.final_regressor:
-            # vw sometimes does not build model but does not signal error with returncode either
-            vw_cmd += ' -f %s' % options.final_regressor
+        if final_regressor:
+            vw_cmd += ' -f %s' % final_regressor
 
         predictions_fname = options.predictions
 
@@ -1877,7 +1941,20 @@ def main():
                     row.append(str(example))
                 output.writerow(row)
 
-        sys.exit(0)
+    if options.savefeatures:
+        vw_cmd = 'vw'
+
+        if isinstance(vw_source, basestring):
+            assert os.path.exists(vw_source), vw_source
+            vw_cmd += ' -d %s' % (vw_source, )
+            vw_stdin = None
+        else:
+            vw_stdin = vw_source.getvalue()
+
+        vw_cmd += ' -i %s -t -a' % final_regressor
+        to_cleanup.append(options.savefeatures + '.tmp')
+        system(vw_cmd + ' | %s %s --parseaudit > %s.tmp' % (sys.executable, __file__, options.savefeatures))
+        os.rename(options.savefeatures + '.tmp', options.savefeatures)
 
     unlink(*to_cleanup)
 
