@@ -294,6 +294,10 @@ def split_file(source, nfolds=None, ignoreheader=False, log_level=0):
     nfolds = int(math.ceil(total_lines / float(foldsize)))
     if nfolds != orig_nfolds:
         log('Reduced number of folds from %r to %r', orig_nfolds, nfolds, log_level=1 + log_level)
+
+    if nfolds <= 1:
+        sys.exit('Too few folds: %r' % nfolds)
+
     folds = []
 
     current_fold = -1
