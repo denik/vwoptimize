@@ -1148,10 +1148,6 @@ def read_labels(filename, source, format, n_classes, columnspec, ignoreheader):
         labels = [int(x) for x in labels]
         labels.sort()
         max_label = labels[-1]
-        if min(labels) != 1:
-            log('Minimum label is not 1, but %r', min(labels))
-        if max_label != len(labels):
-            log('Maximum label is %r, but total number of labels is %r', max_label, len(labels))
         if n_classes:
             if n_classes != len(labels):
                 log('Expected %r classes, but found %r', n_classes, len(labels))
