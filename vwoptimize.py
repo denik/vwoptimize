@@ -1772,6 +1772,7 @@ def main(to_cleanup):
             labels_counts, y_true, config['labels'], config['n_classes'] = read_labels(filename, source, format, config.get('n_classes'), label_index, options.ignoreheader)
             if config['n_classes'] is None:
                 config['threshold'] = (max(y_true) + min(y_true)) / 2.0
+                log('Setting threshold from data = %g', config['threshold'])
 
     if config.get('n_classes'):
         args = re.sub('(--(?:%s)\s+)(0)' % vw_multiclass_opts, '\\g<1>' + str(config['n_classes']), ' '.join(args)).split()
