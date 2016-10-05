@@ -1626,6 +1626,7 @@ def main(to_cleanup):
     parser.add_option('-r', '--raw_predictions')
     parser.add_option('-p', '--predictions')
     parser.add_option('-f', '--final_regressor')
+    parser.add_option('-i', '--input_regressor')
     parser.add_option('-d', '--data')
     parser.add_option('-a', '--audit', action='store_true')
     parser.add_option('--readconfig')
@@ -1671,6 +1672,12 @@ def main(to_cleanup):
     if options.readconfig:
         config = json.load(open(options.readconfig))
         log('vwoptimize config = %s', options.readconfig, log_level=1)
+
+    if 'regressor' in config and not options.input_regressor and '-t' in args:
+        options.input_regressor = config['regressor']
+
+    if options.input_regressor:
+        args = ['-i', options.input_regressor] + args
 
     used_stdin = False
     if options.data in (None, '/dev/stdin', '-'):
@@ -1910,13 +1917,20 @@ def main(to_cleanup):
     final_regressor = options.final_regressor
 
     config_tmp_filename = None
-    if final_regressor:
-        if options.writeconfig:
-            log('write config = %s', options.writeconfig, log_level=1)
-            assert options.writeconfig != options.final_regressor, options.writeconfig
-            config_tmp_filename = options.writeconfig + '.tmp'
-            to_cleanup.append(config_tmp_filename)
-            json.dump(config, open(config_tmp_filename, 'w'), sort_keys=True, indent=4)
+    if options.writeconfig:
+        log('write config = %s', options.writeconfig, log_level=1)
+        assert options.writeconfig != options.final_regressor, options.writeconfig
+
+        if final_regressor:
+            print [final_regressor, options.writeconfig, os.path.relpath(final_regressor, os.path.dirname(options.writeconfig))]
+            config['regressor'] = os.path.relpath(final_regressor, os.path.dirname(options.writeconfig))
+
+        config_tmp_filename = options.writeconfig + '.tmp'
+        to_cleanup.append(config_tmp_filename)
+        output_fobj = open(config_tmp_filename, 'w')
+        json.dump(config, output_fobj, sort_keys=True, indent=4)
+        output_fobj.write('\n')
+        output_fobj.close()
 
     if not final_regressor and options.savefeatures:
         final_regressor = get_temp_filename('final_regressor')
@@ -2011,8 +2025,10 @@ def main(to_cleanup):
         else:
             vw_stdin = vw_source.getvalue()
 
-        assert final_regressor
-        vw_cmd += ' -i %s -t -a' % final_regressor
+        regressor = final_regressor or options.input_regressor
+
+        assert regressor
+        vw_cmd += ' -i %s -t -a' % regressor
         to_cleanup.append(options.savefeatures + '.tmp')
         system(vw_cmd + ' | %s %s --parseaudit > %s.tmp' % (sys.executable, __file__, options.savefeatures))
         os.rename(options.savefeatures + '.tmp', options.savefeatures)
