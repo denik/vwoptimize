@@ -1801,7 +1801,7 @@ def main(to_cleanup):
             workers=options.workers)
         sys.exit(0)
 
-    options.metric = _make_proper_list(options.metric)
+    options.metric = _make_proper_list(options.metric) or []
 
     if options.report:
         if not options.metric:
@@ -1892,10 +1892,11 @@ def main(to_cleanup):
                 r_fname=options.raw_predictions,
                 audit=options.audit)
 
-            if options.metric:
-                for metric in options.metric:
-                    value = calculate_score(metric, y_true, cv_pred, config)
-                    print 'cv %s: %g' % (metric, value)
+            assert y_true is not None
+
+            for metric in options.metric:
+                value = calculate_score(metric, y_true, cv_pred, config)
+                print 'cv %s: %g' % (metric, value)
 
         finally:
             unlink(*folds)
