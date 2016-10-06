@@ -1924,7 +1924,6 @@ def main(to_cleanup):
         assert options.writeconfig != options.final_regressor, options.writeconfig
 
         if final_regressor:
-            print [final_regressor, options.writeconfig, os.path.relpath(final_regressor, os.path.dirname(options.writeconfig))]
             config['regressor'] = os.path.relpath(final_regressor, os.path.dirname(options.writeconfig))
 
         config_tmp_filename = options.writeconfig + '.tmp'
