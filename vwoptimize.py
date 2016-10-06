@@ -1764,7 +1764,7 @@ def main(to_cleanup):
     labels_counts = None
     y_true = None
 
-    need_to_read_labels = options.metric or 'labels' not in config
+    need_to_read_labels = options.metric or 'labels' not in config or options.toperrors
     #  ^ This is not correct condition. we only need labels for weight_metric
     #  ^ This also won't be right for "vw_average_loss" label, which is parsed from VW output, not calculated
 
@@ -1983,6 +1983,8 @@ def main(to_cleanup):
                 print '%s: %g' % (metric, calculate_score(metric, y_true, y_pred, config))
 
         if options.toperrors:
+            assert y_true is not None
+
             if y_pred is None:
                 y_pred = np.array(_load_first_float_from_each_string(predictions_fname))
 
