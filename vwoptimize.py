@@ -844,16 +844,11 @@ def vw_optimize_over_cv(vw_source, folds, args, metric, config,
 
         unlink(predictions_filename_tmp, raw_predictions_filename_tmp)
 
-        def frmt(x):
-            if isinstance(x, float):
-                return '%.4f' % x
-            return str(x)
-
-        other_results = ' '.join(['%s=%s' % (m, frmt(calculate_score(m, y_true, y_pred, config))) for m in other_metrics])
+        other_results = ' '.join(['%s=%s' % (m, _frmt_score_short(calculate_score(m, y_true, y_pred, config))) for m in other_metrics])
         if other_results:
             other_results = '  ' + other_results
 
-        log('Result vw %s... %s=%.4f%s%s', args, metric, abs(result), is_best, other_results, log_level=1 + bool(is_best))
+        log('Result vw %s... %s=%s%s%s', args, metric, _frmt_score_short(result), is_best, other_results, log_level=1 + bool(is_best))
 
         cache[args] = result
         return result
@@ -1541,13 +1536,13 @@ def main_tune(metric, config, source, format, args, preprocessor_base, nfolds, i
 
         if preprocessor_opts:
             print 'Best options with %s: %s' % (preprocessor_opts or 'no preprocessing', this_best_options, )
-        print 'Best %s with %r: %.4f%s' % (optimization_metric, preprocessor_opts or 'no preprocessing', abs(this_best_result or 0.0), is_best)
+        print 'Best %s with %r: %s%s' % (optimization_metric, preprocessor_opts or 'no preprocessing', _frmt_score_short(this_best_result), is_best)
         # print 'Improvement over no l1=%.4f. Improvement over initial guess=%.4f' % (no_l1_result - best_result[0], initial_l1_result - best_result[0])
 
     # XXX don't show this if preprocessor is not enabled and not tuned
     print 'Best preprocessor options: %s' % (best_preprocessor_opts or '<none>', )
     print 'Best vw options: %s' % (best_vw_options, )
-    print 'Best %s: %.4f' % (optimization_metric, abs(best_result))
+    print 'Best %s: %s' % (optimization_metric, _frmt_score_short(best_result))
     # print 'Improvement over no l1=%.4f. Improvement over initial guess=%.4f' % (no_l1_result - best_result[0], initial_l1_result - best_result[0])
     preprocessor = Preprocessor.from_options(best_preprocessor_opts)
     return best_vw_options, preprocessor
@@ -1645,7 +1640,17 @@ def main_streaming(source, format, columnspec, vw_args, vw_options, preprocessor
 
 def _frmt_score(x):
     if isinstance(x, float):
+        if x < 0:
+            x = -x
         return '%g' % x
+    return str(x)
+
+
+def _frmt_score_short(x):
+    if isinstance(x, float):
+        if x < 0:
+            x = -x
+        return '%.4f' % x
     return str(x)
 
 
