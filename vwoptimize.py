@@ -986,6 +986,9 @@ class Preprocessor(object):
 
     @classmethod
     def from_options(cls, options):
+        if not options:
+            return None
+
         if isinstance(options, list):
             options = ' '.join(x for x in options if isinstance(x, basestring))
 
@@ -1939,6 +1942,7 @@ def main(to_cleanup):
             nfolds=options.nfolds,
             ignoreheader=options.ignoreheader,
             workers=options.workers)
+        assert config['vw_train_options'], config
         config['preprocessor'] = str(preprocessor)
     else:
         config['vw_train_options'] = ' '.join(args)
