@@ -866,10 +866,8 @@ def vw_optimize_over_cv(vw_filename, folds, args, metric, config,
         assert len(y_true) == len(y_pred), (vw_filename, len(y_true), predictions_filename_tmp, len(y_pred), os.getpid())
         result = calculate_score(metric, y_true, y_pred, config)
 
-        if metric.replace('_w', '') in 'acc auc f1 precision recall'.split():
+        if not is_loss(metric):
             result = -result
-        else:
-            assert metric.replace('_w', '') in ['mse', ''], metric
 
         is_best = ''
         if best_result[0] is None or result < best_result[0]:
@@ -1416,12 +1414,10 @@ def convert_any_to_vw(source, format, output_filename, preprocessor, config, ign
         log('\n'.join(open(output_filename).read(200).split('\n')) + '...')
 
 
-metrics_on_score = {
+metrics_shortcuts = {
     'mse': 'mean_squared_error',
     'auc': 'roc_auc_score',
-}
-
-metrics_on_label = {
+    'brier': 'brier_score_loss',
     'acc': 'accuracy_score',
     'precision': 'precision_score',
     'recall': 'recall_score',
@@ -1429,12 +1425,32 @@ metrics_on_label = {
     'cm': 'confusion_matrix',
 }
 
+metrics_param = {
+    'mean_squared_error': 'y_score',
+    'roc_auc_score': 'y_score',
+    'brier_score_loss': 'y_prob',
+    'accuracy_score': 'y_pred',
+    'precision_score': 'y_pred',
+    'recall_score': 'y_pred',
+    'f1_score': 'y_pred',
+    'confusion_matrix': 'y_pred',
+}
+
+def is_loss(metric_name):
+    if metric_name.endswith('_w'):
+        metric_name = metric_name[:-2]
+    metric_name = metrics_shortcuts.get(metric_name, metric_name)
+    if metric_name.endswith('_loss') or metric_name.endswith('_error'):
+        return True
+
 
 def calculate_score(metric, y_true, y_pred, config):
     sample_weight = get_sample_weight(y_true, config.get('weight_metric'))
 
     n_classes = config.get('n_classes')
     threshold = config.get('threshold')
+    min_label = config.get('min_label')
+    max_label = config.get('max_label')
 
     if n_classes is None and threshold is None:
         sys.exit('Bad config: missing n_classes and threshold:\n%s' % pprint.pformat(config))
@@ -1448,15 +1464,29 @@ def calculate_score(metric, y_true, y_pred, config):
     else:
         extra_args = {}
 
+    fullname = metrics_shortcuts.get(metric)
+
     import sklearn.metrics
-    if metric in metrics_on_score:
-        fullname = metrics_on_score[metric]
+    func = getattr(sklearn.metrics, fullname)
+
+    metric_type = metrics_param.get(fullname)
+
+    if metric_type == 'y_prob':
+        # brier_score_loss
         assert threshold is not None, 'Cannot apply %s/%s on multiclass' % (metric, fullname)
-        func = getattr(sklearn.metrics, fullname)
+        assert min_label is not None and max_label is not None, config
+        delta = float(max_label - min_label)
+        assert delta
+        y_true = (y_true - min_label) / delta
+        y_pred = (y_pred - min_label) / delta
+        y_pred = np.minimum(y_pred, 1)
+        y_pred = np.maximum(y_pred, 0)
         return func(y_true, y_pred, **extra_args)
-    elif metric in metrics_on_label:
-        fullname = metrics_on_label[metric]
-        func = getattr(sklearn.metrics, fullname)
+    elif metric_type == 'y_score':
+        # auc, mse
+        assert threshold is not None, 'Cannot apply %s/%s on multiclass' % (metric, fullname)
+        return func(y_true, y_pred, **extra_args)
+    elif metric_type == 'y_pred':
         if threshold is not None:
             y_true_norm = y_true > threshold
             y_pred_norm = y_pred > threshold
@@ -1464,7 +1494,7 @@ def calculate_score(metric, y_true, y_pred, config):
         else:
             return func(y_true, y_pred, **extra_args)
     else:
-        sys.exit('Cannot calculate metric: %r' % metric)
+        sys.exit('Unknown metric: %r' % metric)
 
 
 def main_tune(metric, config, source, format, args, preprocessor_base, nfolds, ignoreheader, workers):
@@ -1781,7 +1811,9 @@ def main(to_cleanup):
         if label_index is not None:
             labels_counts, y_true, config['labels'], config['n_classes'] = read_labels(filename, source, format, config.get('n_classes'), label_index, options.ignoreheader)
             if config['n_classes'] is None:
-                config['threshold'] = (max(y_true) + min(y_true)) / 2.0
+                config['min_label'] = min(y_true)
+                config['max_label'] = max(y_true)
+                config['threshold'] = (config['min_label'] + config['max_label']) / 2.0
                 log('Setting threshold from data = %g', config['threshold'])
 
     if config.get('n_classes'):
