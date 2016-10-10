@@ -1436,6 +1436,7 @@ metrics_param = {
     'confusion_matrix': 'y_pred',
 }
 
+
 def is_loss(metric_name):
     if metric_name.endswith('_w'):
         metric_name = metric_name[:-2]
