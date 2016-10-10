@@ -1893,7 +1893,7 @@ def main(to_cleanup):
         assert y_true is not None
 
         for metric in options.metric:
-            print '%s: %g' % (metric, calculate_score(metric, y_true, y_pred, config))
+            print '%s: %s' % (metric, calculate_score(metric, y_true, y_pred, config))
 
         sys.exit(0)
 
@@ -2046,7 +2046,7 @@ def main(to_cleanup):
             y_pred = np.array(_load_first_float_from_each_string(predictions_fname))
 
             for metric in options.metric:
-                print '%s: %g' % (metric, calculate_score(metric, y_true, y_pred, config))
+                print '%s: %s' % (metric, calculate_score(metric, y_true, y_pred, config))
 
         if options.toperrors:
             assert y_true is not None
