@@ -21,6 +21,7 @@ csv.field_size_limit(10000000)
 LOG_LEVEL = 1
 MAIN_PID = str(os.getpid())
 KEEPTMP = False
+STDIN_NAMES = ('/dev/stdin', '-')
 
 
 for path in '.vwoptimize /tmp/vwoptimize'.split():
@@ -1667,7 +1668,7 @@ def main(to_cleanup):
         args = ['-i', options.input_regressor] + args
 
     used_stdin = False
-    if options.data in (None, '/dev/stdin', '-'):
+    if options.data is None or options.data in STDIN_NAMES:
         if options.data is None:
             log('Reading examples from stdin...', log_level=1)
 
@@ -1809,9 +1810,9 @@ def main(to_cleanup):
     if options.report:
         if not options.metric:
             options.metric = ['mse']
-        if options.predictions in ('/dev/stdin', '-'):
+        if options.predictions in STDIN_NAMES:
             if used_stdin:
-                sys.exit('Can only use /dev/stdin in one argument')
+                sys.exit('Can only use stdin in one argument')
             predictions = sys.stdin
         elif options.predictions:
             predictions = options.predictions
