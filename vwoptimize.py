@@ -1235,6 +1235,68 @@ def get_balanced_weights(labels_counts):
     return result
 
 
+def convert_row_to_vw(row, columnspec, preprocessor=None, labels=None, weights=None):
+    assert isinstance(columnspec, list), columnspec
+
+    # labels maps user labels into VW label. Can be None.
+    assert labels is None or isinstance(labels, dict), labels
+
+    # weights maps user label into weight. Can be None.
+    assert labels is None or isinstance(weights, dict), weights
+
+    if len(row) != len(columnspec):
+        sys.exit('Expected %r columns (%r), got %r (%r)' % (len(columnspec), columnspec, len(row), row))
+
+    y = None
+    x = []
+    info = []
+    for item, spec in zip(row, columnspec):
+        if spec == 'y':
+            y = item
+        elif spec == 'text':
+            x.append(item)
+        elif spec == 'info':
+            info.append(item)
+        elif spec == 'drop' or not spec:
+            continue
+        else:
+            sys.exit('Spec item %r not understood' % spec)
+
+    if info:
+        info = " '%s" % ';'.join(info) + ' '
+    else:
+        info = ''
+
+    if labels:
+        vw_y = labels.get(y)
+        if vw_y is None:
+            sys.exit('Unexpected label: %s', limited_repr(y), log_level=2)
+    else:
+        if y is None:
+            vw_y = ''
+        else:
+            vw_y = y
+
+    if weights is not None:
+        weight = weights.get(y, 1)
+        if weight == 1:
+            weight = ''
+        else:
+            weight = str(weight) + ' '
+    else:
+        weight = ''
+
+    if preprocessor:
+        x = preprocessor.process_row(x)
+        text = '  '.join(x)
+    else:
+        text = ' '.join(x)
+    text = text.replace(':', ' ').replace('|', ' ')
+    text = text.strip()
+    text = '%s %s%s| %s\n' % (vw_y, weight, info, text)
+    return text
+
+
 def _convert_any_to_vw(source, format, output, labels, weights, preprocessor, columnspec):
     assert format != 'vw'
     assert isinstance(columnspec, list)
@@ -1245,63 +1307,9 @@ def _convert_any_to_vw(source, format, output, labels, weights, preprocessor, co
     rows_source = open_anything(source, format)
     output = open(output, 'wb')
 
-    errors = 0
     for row in rows_source:
-        if len(row) != len(columnspec):
-            sys.exit('Expected %r columns (%r), got %r (%r)' % (len(columnspec), columnspec, len(row), row))
-        y = None
-        x = []
-        info = []
-        for item, spec in zip(row, columnspec):
-            if spec == 'y':
-                y = item
-            elif spec == 'text':
-                x.append(item)
-            elif spec == 'info':
-                info.append(item)
-            elif spec == 'drop' or not spec:
-                continue
-            else:
-                sys.exit('Spec item %r not understood' % spec)
-
-        if info:
-            info = " '%s" % ';'.join(info) + ' '
-        else:
-            info = ''
-
-        if labels:
-            vw_y = labels.get(y)
-            if vw_y is None:
-                log('Unexpected label: %s', limited_repr(y), log_level=2)
-                errors += 1
-                if errors > 5:
-                    sys.exit(1)
-                continue
-        else:
-            if y is None:
-                vw_y = ''
-            else:
-                vw_y = y
-
-        if weights is not None:
-            weight = weights.get(y, 1)
-            if weight == 1:
-                weight = ''
-            else:
-                weight = str(weight) + ' '
-        else:
-            weight = ''
-
-        if preprocessor:
-            x = preprocessor.process_row(x)
-            text = '  '.join(x)
-        else:
-            text = ' '.join(x)
-        text = text.replace(':', ' ').replace('|', ' ')
-        text = text.strip()
-        text = '%s %s%s| %s\n' % (vw_y, weight, info, text)
-        output.write(text)
-        errors = 0
+        vw_line = convert_row_to_vw(row, columnspec, preprocessor=preprocessor, labels=labels, weights=weights)
+        output.write(vw_line)
 
     output.flush()
     os.fsync(output.fileno())
