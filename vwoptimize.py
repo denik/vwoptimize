@@ -76,6 +76,9 @@ def kill(*jobs, **kwargs):
 
 
 def open_regular_or_compressed(filename):
+    if filename is None:
+        return sys.stdin
+
     if hasattr(filename, 'read'):
         fobj = filename
     else:
@@ -171,14 +174,18 @@ def _read_lines_csv(reader):
         yield row
 
 
-def open_anything(source, format):
+def open_anything(source, format, ignoreheader):
     if format == 'vw':
         return _read_lines_vw(open_regular_or_compressed(source))
 
     if format == 'tsv':
         reader = csv.reader(open_regular_or_compressed(source), csv.excel_tab)
+        if ignoreheader:
+            reader.next()
     elif format == 'csv':
         reader = csv.reader(open_regular_or_compressed(source), csv.excel)
+        if ignoreheader:
+            reader.next()
     else:
         raise ValueError('format not supported: %s' % format)
 
@@ -223,8 +230,6 @@ def system(cmd, log_level=0, stdin=None):
 def split_file(source, nfolds=None, ignoreheader=False, log_level=0, minfolds=1):
     if nfolds is None:
         nfolds = 10
-
-    # XXX must use open_anything to support csv files with headers
 
     if isinstance(source, basestring):
         ext = get_real_ext(source)
@@ -1058,17 +1063,14 @@ def read_labels(filename, source, format, n_classes, label_index, ignoreheader):
     labels_counts = {}
     examples_count = 0
 
-    log('Reading labels from %s', filename or source)
-    rows_source = open_anything(filename or source, format)
+    log('Reading labels from %s', filename or 'stdin')
+    rows_source = open_anything(filename or source, format, ignoreheader=ignoreheader)
 
     all_integers = True
     all_floats = True
     y_true = []
 
     for row in rows_source:
-        if ignoreheader:
-            ignoreheader = None
-            continue
         label = row[label_index]
         y_true.append(label)
         n = labels_counts[label] = labels_counts.get(label, 0) + 1
@@ -1297,14 +1299,14 @@ def convert_row_to_vw(row, columnspec, preprocessor=None, labels=None, weights=N
     return text
 
 
-def _convert_any_to_vw(source, format, output, labels, weights, preprocessor, columnspec):
+def _convert_any_to_vw(source, format, output, labels, weights, preprocessor, columnspec, ignoreheader):
     assert format != 'vw'
     assert isinstance(columnspec, list)
 
     if labels:
         labels = dict((label, 1 + labels.index(label)) for label in labels)
 
-    rows_source = open_anything(source, format)
+    rows_source = open_anything(source, format, ignoreheader=ignoreheader)
     output = open(output, 'wb')
 
     for row in rows_source:
@@ -1316,12 +1318,8 @@ def _convert_any_to_vw(source, format, output, labels, weights, preprocessor, co
     output.close()
 
 
-def convert_any_to_vw(source, format, output_filename, preprocessor, config, ignoreheader, workers=None):
+def convert_any_to_vw(source, format, output_filename, columnspec, labels, weights, preprocessor, ignoreheader, workers):
     assert format != 'vw'
-    labels = config.get('labels')
-    weights = config.get('weight_train')
-    columnspec = config.get('columnspec')
-
     preprocessor = preprocessor or ''
 
     assert isinstance(preprocessor, basestring), preprocessor
@@ -1502,12 +1500,14 @@ def main_tune(metric, config, source, format, args, preprocessor_base, nfolds, i
         else:
             vw_filename = get_temp_filename('vw_filename')
             convert_any_to_vw(
-                source,
-                format,
-                vw_filename,
-                preprocessor_opts,
-                config,
-                ignoreheader,
+                source=source,
+                format=format,
+                output_filename=vw_filename,
+                columnspec=config.get('columnspec'),
+                labels=config.get('labels'),
+                weights=config.get('weights'),
+                preprocessor=preprocessor_opts,
+                ignoreheader=ignoreheader,
                 workers=workers)
 
         folds, total = split_file(vw_filename, nfolds)
@@ -1602,6 +1602,43 @@ def parseaudit(source):
             print item
 
 
+def main_streaming(source, format, columnspec, vw_args, vw_options, preprocessor, labels, weights, ignoreheader):
+    vw_cmd = 'vw %s' % vw_args
+
+    if vw_options.input_regressor:
+        vw_cmd += ' -i %s' % vw_options.input_regressor
+
+    if vw_options.final_regressor:
+        vw_cmd += ' -f %s' % vw_options.final_regressor
+
+    if vw_options.predictions:
+        vw_cmd += ' -p %s' % vw_options.predictions
+
+    if vw_options.raw_predictions:
+        vw_cmd += ' -r %s' % vw_options.raw_predictions
+
+    if vw_options.audit:
+        vw_cmd += ' -a'
+
+    vw_cmd = vw_cmd.split()
+
+    if format == 'vw':
+        if source is None:
+            popen = subprocess.Popen(vw_cmd, stdin=sys.stdin, preexec_fn=die_if_parent_dies)
+        else:
+            vw_cmd.extend(['-d', source])
+            popen = subprocess.Popen(vw_cmd, preexec_fn=die_if_parent_dies)
+    else:
+        popen = subprocess.Popen(vw_cmd, stdin=subprocess.PIPE, preexec_fn=die_if_parent_dies)
+        for row in open_anything(source, format, ignoreheader=ignoreheader):
+            line = convert_row_to_vw(row, columnspec=columnspec, preprocessor=preprocessor, labels=labels, weights=weights)
+            popen.stdin.write(line)
+            # subprocess.Popen is unbuffered by default
+        popen.stdin.close()
+
+    popen.wait()
+
+
 def main(to_cleanup):
     parser = PassThroughOptionParser()
 
@@ -1677,16 +1714,9 @@ def main(to_cleanup):
 
     used_stdin = False
     if options.data is None or options.data in STDIN_NAMES:
-        if options.data is None:
-            log('Reading examples from stdin...', log_level=1)
-
         used_stdin = True
-        from StringIO import StringIO
-        input = sys.stdin.read()
-        source = StringIO(input)
         filename = None
     else:
-        source = None
         filename = options.data
 
     labels = _make_proper_list(options.labels)
@@ -1722,24 +1752,6 @@ def main(to_cleanup):
     else:
         preprocessor = None
 
-    if options.tovw_simple:
-        assert not options.workers or options.workers == 1, options.workers
-        assert not options.ignoreheader
-        assert options.format in ('vw', 'csv', 'tsv')
-        assert 'balaced' not in str(options.weight_train), '"balanced" not supported here: %r' % options.weight_train
-        _convert_any_to_vw(
-            source or filename,
-            options.format,
-            options.tovw_simple,
-            labels,
-            weight_train,
-            preprocessor,
-            config.get('columnspec'))
-        sys.exit(0)
-
-    if options.threshold is not None:
-        config['threshold'] = options.threshold
-
     format = options.format
 
     if not format and filename:
@@ -1751,9 +1763,26 @@ def main(to_cleanup):
     format = format or config.get('format')
 
     if not format:
-        sys.exit('Missing --format vw|csv|tsv')
+        format = 'vw'
 
     config['format'] = format
+
+    if options.tovw_simple:
+        assert not options.workers or options.workers == 1, options.workers
+        assert 'balaced' not in str(options.weight_train), '"balanced" not supported here: %r' % options.weight_train
+        _convert_any_to_vw(
+            filename,
+            format,
+            options.tovw_simple,
+            labels,
+            weight_train,
+            preprocessor,
+            config.get('columnspec'),
+            ignoreheader=options.ignoreheader)
+        sys.exit(0)
+
+    if options.threshold is not None:
+        config['threshold'] = options.threshold
 
     vw_multiclass_opts = 'oaa|ect|csoaa|log_multi|recall_tree'
 
@@ -1761,12 +1790,44 @@ def main(to_cleanup):
     if n_classes_cmdline:
         config['n_classes'] = max(int(x) for x in n_classes_cmdline)
 
+
+    need_tuning = 0
+
+    for arg in args:
+        if arg.endswith('?'):
+            need_tuning = 1
+            break
+
+    can_do_streaming = True
+    if config.get('n_classes') == 0 or options.metric or options.cv or options.toperrors or need_tuning or options.savefeatures or options.tovw or options.tovw_simple:
+        can_do_streaming = False
+
+    if can_do_streaming:
+        main_streaming(
+            source=filename,
+            format=format,
+            columnspec=config.get('columnspec'),
+            vw_args=' '.join(args),
+            vw_options=options,
+            preprocessor=preprocessor,
+            labels=labels,
+            weights=config.get('weights'),
+            ignoreheader=options.ignoreheader)
+        sys.exit(0)
+
     labels_counts = None
     y_true = None
 
     need_to_read_labels = options.metric or 'labels' not in config or options.toperrors
     #  ^ This is not correct condition. we only need labels for weight_metric
     #  ^ This also won't be right for "vw_average_loss" label, which is parsed from VW output, not calculated
+
+    if filename is None:
+        filename = None
+        from StringIO import StringIO
+        source = StringIO(sys.stdin.read())
+    else:
+        source = None
 
     if need_to_read_labels:
         if format == 'vw':
@@ -1804,12 +1865,14 @@ def main(to_cleanup):
     if options.tovw:
         assert format != 'vw', 'Input should be csv or tsv'  # XXX
         convert_any_to_vw(
-            source or filename,
-            format,
-            options.tovw,
-            config.get('preprocessor'),
-            config,
-            options.ignoreheader,
+            source=source or filename,
+            format=format,
+            output_filename=options.tovw,
+            preprocessor=config.get('preprocessor'),
+            columnspec=config.get('columnspec'),
+            labels=config.get('labels'),
+            weights=config.get('weight_train'),
+            ignoreheader=options.ignoreheader,
             workers=options.workers)
         sys.exit(0)
 
@@ -1852,7 +1915,7 @@ def main(to_cleanup):
 
     if need_tuning:
         assert not options.audit, '-a incompatible with parameter tuning'
-        config['vw_options'], preprocessor = main_tune(
+        config['vw_train_options'], preprocessor = main_tune(
             metric=options.metric,
             config=config,
             source=source or filename,
@@ -1864,7 +1927,7 @@ def main(to_cleanup):
             workers=options.workers)
         config['preprocessor'] = str(preprocessor)
     else:
-        config['vw_options'] = ' '.join(args)
+        config['vw_train_options'] = ' '.join(args)
 
     if format == 'vw':
         assert not preprocessor or not preprocessor.to_options(), preprocessor
@@ -1874,12 +1937,14 @@ def main(to_cleanup):
         to_cleanup.append(vw_filename)
 
         convert_any_to_vw(
-            source or filename,
-            format,
-            vw_filename,
-            config.get('preprocessor'),
-            config,
-            options.ignoreheader,
+            source=source or filename,
+            format=format,
+            output_filename=vw_filename,
+            preprocessor=config.get('preprocessor'),
+            columnspec=config.get('columnspec'),
+            labels=config.get('labels'),
+            weights=config.get('weight_train'),
+            ignoreheader=options.ignoreheader,
             workers=options.workers)
 
         vw_source = vw_filename
@@ -1898,7 +1963,7 @@ def main(to_cleanup):
 
             cv_pred = vw_cross_validation(
                 folds,
-                config['vw_options'],
+                config['vw_train_options'],
                 workers=options.workers,
                 p_fname=cv_predictions,
                 r_fname=options.raw_predictions,
@@ -1945,7 +2010,7 @@ def main(to_cleanup):
         to_cleanup.append(final_regressor_tmp)
 
     if final_regressor_tmp or not (options.cv or need_tuning):
-        vw_cmd = 'vw %s' % config['vw_options']
+        vw_cmd = 'vw %s' % config['vw_train_options']
 
         if isinstance(vw_source, basestring):
             assert os.path.exists(vw_source), vw_source
@@ -1992,7 +2057,7 @@ def main(to_cleanup):
 
             errors = []
 
-            for yp, yt, example in zip(y_pred, y_true, open_anything(source or filename, format)):
+            for yp, yt, example in zip(y_pred, y_true, open_anything(source or filename, format, ignoreheader=options.ignoreheader)):
                 # add hash of the example as a second item so that we get a mix of false positives and false negatives for a given error level
                 errors.append((abs(yp - yt), hash(repr(example)), yp, example))
 

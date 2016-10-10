@@ -16,12 +16,12 @@ class Test(TestCase):
         vwopt_output = grab_output('%s -p tmp/vw_pred -r tmp/vw_raw 2>&1 ' % cmd)
         self.assertMultiLineEqual(open('tmp/vw_pred_real').read(), open('tmp/vw_pred').read())
         self.assertMultiLineEqual(open('tmp/vw_raw_real').read(), open('tmp/vw_raw').read())
-        self.assertMultiLineEqual('Found 2 integer classes: 0: 66.67%, 1: 33.33%\n' + vw_output, vwopt_output)
+        self.assertMultiLineEqual(vw_output, vwopt_output)
 
     def test_data(self):
         self._test_vwoptimize_same_output('vw -d simple.vw  --passes 10 -c -k --holdout_off')
 
-    def broken_test_stdin(self):
+    def test_stdin(self):
         self._test_vwoptimize_same_output('cat simple.vw | vw --passes 10 -c -k --holdout_off')
 
 
