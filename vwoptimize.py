@@ -1790,7 +1790,6 @@ def main(to_cleanup):
     if n_classes_cmdline:
         config['n_classes'] = max(int(x) for x in n_classes_cmdline)
 
-
     need_tuning = 0
 
     for arg in args:
