@@ -753,7 +753,7 @@ def get_tuning_config(config):
     return type(**params)
 
 
-def vw_optimize_over_cv(vw_filename, folds, args, metric, config,
+def vw_optimize_over_cv(vw_source, folds, args, metric, config,
                         predictions_filename=None, raw_predictions_filename=None, workers=None, other_metrics=[]):
     # we only depend on scipy if parameter tuning is enabled
     import scipy.optimize
@@ -786,7 +786,11 @@ def vw_optimize_over_cv(vw_filename, folds, args, metric, config,
     cache = {}
     best_result = [None, None]
 
-    y_true = _load_first_float_from_each_string(vw_filename)
+    if hasattr(vw_source, 'seek'):
+        vw_source.seek(0)
+
+    y_true = _load_first_float_from_each_string(vw_source)
+    assert y_true, vw_source
     y_true = np.array(y_true)
 
     def run(params):
@@ -822,7 +826,7 @@ def vw_optimize_over_cv(vw_filename, folds, args, metric, config,
 
         y_pred = _load_first_float_from_each_string(predictions_filename_tmp)
         y_pred = np.array(y_pred)
-        assert len(y_true) == len(y_pred), (vw_filename, len(y_true), predictions_filename_tmp, len(y_pred), os.getpid())
+        assert len(y_true) == len(y_pred), (vw_source, len(y_true), predictions_filename_tmp, len(y_pred), os.getpid())
         result = calculate_score(metric, y_true, y_pred, config)
 
         if not is_loss(metric):
