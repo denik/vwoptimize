@@ -18,7 +18,7 @@ cv mse: 0.085602
 
     def test_predictions(self):
         # also tests reading .vw from stdin
-        cmd = 'PYTHON ../vwoptimize.py --cv --oaa 3 -p tmp/cv_predictions -r tmp/cv_raw_predictions -f tmp/model.vwoptimize --quiet --lesslogs'
+        cmd = 'PYTHON ../vwoptimize.py --format vw --cv --oaa 3 -p tmp/cv_predictions -r tmp/cv_raw_predictions -f tmp/model.vwoptimize --quiet --lesslogs'
         self.assert_command_output('head -n 10 iris.vw | ' + cmd, '')
         self.assertMultiLineEqual(open('tmp/cv_predictions').read(), open('iris.vw.10.cv_predictions').read())
         self.assertMultiLineEqual(open('tmp/cv_raw_predictions').read(), open('iris.vw.10.cv_raw_predictions').read())

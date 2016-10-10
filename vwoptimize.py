@@ -121,59 +121,12 @@ def log(s, *params, **kwargs):
         sys.stderr.write('%s\n' % (s, ))
 
 
-def guess_format_from_contents(lines):
-    count_pipes = set([x.count('|') for x in lines if x.strip(' \r\n')])
-    count_tabs = set([x.count('\t') for x in lines if x.strip(' \r\n')])
-    count_commas = set([x.count(',') for x in lines if x.strip(' \r\n')])
-
-    possible_formats = []
-
-    if count_pipes and 0 not in count_pipes:
-        possible_formats.append('vw')
-
-    if count_tabs and 0 not in count_tabs and len(count_tabs) == 1:
-        possible_formats.append('tsv')
-
-    if count_commas and 0 not in count_commas and len(count_commas) == 1:
-        possible_formats.append('csv')
-
-    if len(possible_formats) == 1:
-        return possible_formats[0]
-
-    if count_commas and 0 not in count_commas:
-        return 'csv'
-
-
-def guess_format_from_filename(filename):
+def get_format_from_filename(filename):
     items = filename.lower().split('.')
 
     for ext in reversed(items):
         if ext in ['vw', 'csv', 'tsv']:
             return ext
-
-    log('Could not guess format of %s from filename, readine first 10 lines', filename)
-    fobj = open_regular_or_compressed(filename)
-    lines = [fobj.readline() for _ in xrange(10)]
-
-    return guess_format_from_contents(lines)
-
-
-def guess_format(filename):
-    result = None
-
-    if hasattr(filename, 'lower'):
-        result = guess_format_from_filename(filename)
-
-    elif hasattr(filename, 'getvalue'):
-        peek = [x for x in filename.getvalue().split('\n', 10)]
-        if len(peek) >= 10:
-            peek = peek[:-1]
-        result = guess_format_from_contents(peek)
-
-    if result is not None:
-        return result
-
-    sys.exit('Cound not guess format from %s, provide --format vw|tsv|csv' % filename)
 
 
 def _read_lines_vw(fobj):
@@ -1780,11 +1733,18 @@ def main(to_cleanup):
 
     format = options.format
 
+    if not format and filename:
+        format = get_format_from_filename(filename)
+
     if format and format not in ('vw', 'csv', 'tsv'):
         sys.exit('--format must one of vw,csv,tsv, not %r' % format)
 
+    format = format or config.get('format')
+
     if not format:
-        format = guess_format(filename or source)
+        sys.exit('Missing --format vw|csv|tsv')
+
+    config['format'] = format
 
     vw_multiclass_opts = 'oaa|ect|csoaa|log_multi|recall_tree'
 
