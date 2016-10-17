@@ -169,8 +169,6 @@ def _read_lines_csv(reader):
 
         errors = 0
         expected_columns = len(row)
-        klass = row[0]
-        klass = klass.replace(',', '_')
         yield row
 
 
