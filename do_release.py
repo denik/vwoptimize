@@ -17,6 +17,7 @@ def write(filename, data):
 
 
 def system(cmd):
+    sys.stderr.write('+ %s\n' % cmd)
     if os.system(cmd) != 0:
         sys.exit('%r failed' % cmd)
 
@@ -48,8 +49,9 @@ header, count = re.subn(re.escape("GIT"), git_describe, header)
 write(filename, header + rest)
 os.system('diff -U 1 %s.backup %s' % (filename, filename))
 
-system("%s setup.py sdist" % sys.executable)
-system("cp %s.backup %s" % (filename, filename))
+if 'dirty' in git_describe or 'upload' not in sys.argv:
+    system("%s setup.py sdist" % sys.executable)
+else:
+    system("%s setup.py sdist upload" % sys.executable)
 
-if 'dirty' in git_describe:
-    sys.exit('dirty working copy, will not upload')
+system("cp %s.backup %s" % (filename, filename))
