@@ -1621,6 +1621,7 @@ def main_streaming(source, format, columnspec, vw_args, vw_options, preprocessor
     vw_cmd = 'vw %s' % vw_args
 
     if vw_options.input_regressor:
+        assert ' -i ' not in vw_cmd, vw_cmd
         vw_cmd += ' -i %s' % vw_options.input_regressor
 
     if vw_options.final_regressor:
@@ -1739,9 +1740,6 @@ def main(to_cleanup):
             options.input_regressor = os.path.normpath(os.path.join(os.path.dirname(options.readconfig), config['regressor']))
             if not os.path.exists(options.input_regressor):
                 sys.exit('Cannot find %r referenced from %r' % (options.input_regressor, options.readconfig))
-
-    if options.input_regressor:
-        args = ['-i', options.input_regressor] + args
 
     used_stdin = False
     if options.data is None or options.data in STDIN_NAMES:
@@ -1944,6 +1942,7 @@ def main(to_cleanup):
         index += 1
 
     if need_tuning:
+        # QQQ --input_regressor is not passed there
         assert not options.audit, '-a incompatible with parameter tuning'
         config['vw_train_options'], preprocessor = main_tune(
             metric=options.metric,
@@ -1981,6 +1980,7 @@ def main(to_cleanup):
         vw_source = vw_filename
 
     if options.cv:
+        # QQQ --input_regressor is not passed there
         # XXX we could skip --cv here if we make main_tune() keep final predictions and raw_predictions for us
         try:
             folds, total_lines = split_file(vw_source, nfolds=options.nfolds)
@@ -2049,6 +2049,9 @@ def main(to_cleanup):
             vw_stdin = None
         else:
             vw_stdin = vw_source.getvalue()
+
+        if options.input_regressor:
+            vw_cmd += ' -i %s' % options.input_regressor
 
         if final_regressor_tmp:
             vw_cmd += ' -f %s' % final_regressor_tmp
