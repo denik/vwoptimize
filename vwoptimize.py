@@ -172,16 +172,22 @@ def _read_lines_csv(reader):
         yield row
 
 
-def open_anything(source, format, ignoreheader):
+def open_anything(source, format, ignoreheader, forceunbuffered=False):
+    source = open_regular_or_compressed(source)
+
+    if forceunbuffered:
+        # simply disabling buffering is not enough, see this for details: http://stackoverflow.com/a/6556862
+        source = iter(source.readline, '')
+
     if format == 'vw':
-        return _read_lines_vw(open_regular_or_compressed(source))
+        return _read_lines_vw(source)
 
     if format == 'tsv':
-        reader = csv.reader(open_regular_or_compressed(source), csv.excel_tab)
+        reader = csv.reader(source, csv.excel_tab)
         if ignoreheader:
             reader.next()
     elif format == 'csv':
-        reader = csv.reader(open_regular_or_compressed(source), csv.excel)
+        reader = csv.reader(source, csv.excel)
         if ignoreheader:
             reader.next()
     else:
@@ -1639,7 +1645,7 @@ def main_streaming(source, format, columnspec, vw_args, vw_options, preprocessor
             popen = Popen(vw_cmd)
     else:
         popen = Popen(vw_cmd, stdin=subprocess.PIPE)
-        for row in open_anything(source, format, ignoreheader=ignoreheader):
+        for row in open_anything(source, format, ignoreheader=ignoreheader, forceunbuffered=True):
             line = convert_row_to_vw(row, columnspec=columnspec, preprocessor=preprocessor, labels=labels, weights=weights)
             popen.stdin.write(line)
             # subprocess.Popen is unbuffered by default
