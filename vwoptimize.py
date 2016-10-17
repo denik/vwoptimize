@@ -321,6 +321,16 @@ def die_if_parent_dies(signum=9):
         sys.stderr.write(str(ex) + '\n')
 
 
+def Popen(cmd, *args, **kwargs):
+    kwargs.setdefault('preexec_fn', die_if_parent_dies)
+    command = cmd
+    if not isinstance(command, basestring):
+        command = ' '.join(command)
+    log('+ %s', command)
+    popen = subprocess.Popen(cmd, *args, **kwargs)
+    return popen
+
+
 def run_subprocesses(cmds, workers=None, log_level=None):
     workers = _workers(workers)
     cmds_queue = list(cmds)
@@ -329,8 +339,7 @@ def run_subprocesses(cmds, workers=None, log_level=None):
     while queue or cmds_queue:
         if cmds_queue and len(queue) <= workers:
             cmd = cmds_queue.pop()
-            log('+ %s', cmd, log_level=log_level)
-            popen = subprocess.Popen(cmd, shell=True, preexec_fn=die_if_parent_dies)
+            popen = Popen(cmd, shell=True)
             popen._cmd = cmd
             queue.append(popen)
         else:
@@ -1624,12 +1633,12 @@ def main_streaming(source, format, columnspec, vw_args, vw_options, preprocessor
 
     if format == 'vw':
         if source is None:
-            popen = subprocess.Popen(vw_cmd, stdin=sys.stdin, preexec_fn=die_if_parent_dies)
+            popen = Popen(vw_cmd, stdin=sys.stdin)
         else:
             vw_cmd.extend(['-d', source])
-            popen = subprocess.Popen(vw_cmd, preexec_fn=die_if_parent_dies)
+            popen = Popen(vw_cmd)
     else:
-        popen = subprocess.Popen(vw_cmd, stdin=subprocess.PIPE, preexec_fn=die_if_parent_dies)
+        popen = Popen(vw_cmd, stdin=subprocess.PIPE)
         for row in open_anything(source, format, ignoreheader=ignoreheader):
             line = convert_row_to_vw(row, columnspec=columnspec, preprocessor=preprocessor, labels=labels, weights=weights)
             popen.stdin.write(line)
