@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 """Wrapper for Vowpal Wabbit that does cross-validation and hyper-parameter tuning"""
-__version__ = '0.3.1'
+__version__ = '0.4.0dev'
+__gitdescribe__ = 'GIT'
 import sys
 import os
 import optparse
