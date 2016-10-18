@@ -1712,7 +1712,7 @@ def main(to_cleanup):
         config = json.load(open(options.readconfig))
         log('vwoptimize config = %s', options.readconfig, log_level=1)
 
-        if 'regressor' in config and not options.input_regressor and '-t' in args:
+        if 'regressor' in config and not options.input_regressor:
             options.input_regressor = os.path.normpath(os.path.join(os.path.dirname(options.readconfig), config['regressor']))
             if not os.path.exists(options.input_regressor):
                 sys.exit('Cannot find %r referenced from %r' % (options.input_regressor, options.readconfig))
