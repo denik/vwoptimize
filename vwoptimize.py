@@ -148,35 +148,10 @@ def _read_lines_vw(fobj):
             yield (prefix_items[0], orig_line)
 
 
-def _read_lines_csv(reader):
-    expected_columns = None
-    errors = 0
-
-    for row in reader:
-        if not row:
-            continue
-
-        bad_line = False
-
-        if expected_columns is not None and len(row) != expected_columns:
-            bad_line = 'Expected %s columns, got %s' % (expected_columns, len(row))
-
-        if bad_line:
-            log('Bad line (%s): %s', bad_line, limited_repr(row), log_level=3)
-            errors += 1
-            if errors >= 10:
-                sys.exit('Too many errors while reading %s' % reader)
-            continue
-
-        errors = 0
-        expected_columns = len(row)
-        yield row
-
-
-def open_anything(source, format, ignoreheader, forceunbuffered=False):
+def open_anything(source, format, ignoreheader, force_unbuffered=False):
     source = open_regular_or_compressed(source)
 
-    if forceunbuffered:
+    if force_unbuffered:
         # simply disabling buffering is not enough, see this for details: http://stackoverflow.com/a/6556862
         source = iter(source.readline, '')
 
@@ -194,7 +169,7 @@ def open_anything(source, format, ignoreheader, forceunbuffered=False):
     else:
         raise ValueError('format not supported: %s' % format)
 
-    return _read_lines_csv(reader)
+    return reader
 
 
 def limited_repr(obj, limit=80):
@@ -1647,7 +1622,7 @@ def main_streaming(source, format, columnspec, vw_args, vw_options, preprocessor
             popen = Popen(vw_cmd)
     else:
         popen = Popen(vw_cmd, stdin=subprocess.PIPE)
-        for row in open_anything(source, format, ignoreheader=ignoreheader, forceunbuffered=True):
+        for row in open_anything(source, format, ignoreheader=ignoreheader, force_unbuffered=True):
             line = convert_row_to_vw(row, columnspec=columnspec, preprocessor=preprocessor, labels=labels, weights=weights)
             popen.stdin.write(line)
             # subprocess.Popen is unbuffered by default
