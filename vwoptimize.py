@@ -1980,6 +1980,7 @@ def main(to_cleanup):
     if options.cv:
         # QQQ --input_regressor is not passed there
         # XXX we could skip --cv here if we make main_tune() keep final predictions and raw_predictions for us
+        folds = []
         try:
             folds, total_lines = split_file(vw_source, nfolds=options.nfolds)
 
