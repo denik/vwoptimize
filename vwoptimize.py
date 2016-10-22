@@ -1378,6 +1378,7 @@ def convert_any_to_vw(source, format, output_filename, columnspec, labels, weigh
 
 metrics_shortcuts = {
     'mse': 'mean_squared_error',
+    'rmse': 'root_mean_squared_error',
     'auc': 'roc_auc_score',
     'brier': 'brier_score_loss',
     'acc': 'accuracy_score',
@@ -1389,6 +1390,7 @@ metrics_shortcuts = {
 
 metrics_param = {
     'mean_squared_error': 'y_score',
+    'root_mean_squared_error': 'y_score',
     'roc_auc_score': 'y_score',
     'brier_score_loss': 'y_prob',
     'accuracy_score': 'y_pred',
@@ -1396,7 +1398,13 @@ metrics_param = {
     'recall_score': 'y_pred',
     'f1_score': 'y_pred',
     'confusion_matrix': 'y_pred',
+    'matthews_corrcoef': 'y_pred',
 }
+
+
+def root_mean_squared_error(*args, **kwargs):
+    import sklearn.metrics
+    return math.sqrt(sklearn.metrics.mean_squared_error(*args, **kwargs))
 
 
 def is_loss(metric_name):
