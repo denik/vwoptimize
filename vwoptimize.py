@@ -435,7 +435,7 @@ def vw_cross_validation(folds, vw_args, workers=None, p_fname=None, r_fname=None
         unlink(*models)
 
 
-def _load_first_float_from_each_string(file):
+def _load_first_float_from_each_string(file, size=None):
     filename = file
     if hasattr(file, 'read'):
         pass
@@ -452,6 +452,18 @@ def _load_first_float_from_each_string(file):
         except:
             sys.stderr.write('Error while parsing %r\nin %r\n' % (line, filename))
             raise
+
+    if size is not None:
+        if len(result) < size:
+            sys.exit('Too few items in %r: found %r, expecting %r' % (filename, len(result), size))
+
+        if len(result) > size:
+            mult = int(len(result) / size)
+            if size * mult == len(result):
+                # if --passes N option was used, then the number of predictions will be N times higher
+                return result[-size:]
+
+            sys.exit('Too many items in %r: found %r, expecting multiply of %r' % (filename, len(result), size))
 
     return result
 
@@ -813,9 +825,8 @@ def vw_optimize_over_cv(vw_source, folds, args, metric, config,
             cache[args] = 0.0
             return 0.0
 
-        y_pred = _load_first_float_from_each_string(predictions_filename_tmp)
+        y_pred = _load_first_float_from_each_string(predictions_filename_tmp, len(y_true))
         y_pred = np.array(y_pred)
-        assert len(y_true) == len(y_pred), (vw_source, len(y_true), predictions_filename_tmp, len(y_pred), os.getpid())
         result = calculate_score(metric, y_true, y_pred, config)
 
         if not is_loss(metric):
@@ -1416,10 +1427,13 @@ def calculate_score(metric, y_true, y_pred, config):
     else:
         extra_args = {}
 
-    fullname = metrics_shortcuts.get(metric)
+    fullname = metrics_shortcuts.get(metric, metric)
 
     import sklearn.metrics
-    func = getattr(sklearn.metrics, fullname)
+    if fullname in globals():
+        func = globals()[fullname]
+    else:
+        func = getattr(sklearn.metrics, fullname)
 
     metric_type = metrics_param.get(fullname)
 
@@ -1894,8 +1908,8 @@ def main(to_cleanup):
         else:
             sys.exit('Must provide -p')
 
-        y_pred = np.array(_load_first_float_from_each_string(predictions))
         assert y_true is not None
+        y_pred = np.array(_load_first_float_from_each_string(predictions, len(y_true)))
 
         for metric in options.metric:
             print '%s: %s' % (metric, _frmt_score(calculate_score(metric, y_true, y_pred, config)))
@@ -2054,7 +2068,7 @@ def main(to_cleanup):
 
         if options.metric and predictions_fname:
             assert y_true is not None
-            y_pred = np.array(_load_first_float_from_each_string(predictions_fname))
+            y_pred = np.array(_load_first_float_from_each_string(predictions_fname, len(y_true)))
 
             for metric in options.metric:
                 print '%s: %s' % (metric, _frmt_score(calculate_score(metric, y_true, y_pred, config)))
@@ -2063,7 +2077,7 @@ def main(to_cleanup):
             assert y_true is not None
 
             if y_pred is None:
-                y_pred = np.array(_load_first_float_from_each_string(predictions_fname))
+                y_pred = np.array(_load_first_float_from_each_string(predictions_fname, len(y_true)))
 
             errors = []
 
