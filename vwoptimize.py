@@ -703,9 +703,6 @@ class BinaryParam(BaseParam):
         return ['', self.opt]
 
 
-PREPROCESSING_BINARY_OPTS = ['--%s' % x for x in 'htmlunescape lowercase strip_punct stem'.split()]
-
-
 def get_format(value):
     """
     >>> get_format("1e-5")
@@ -1109,12 +1106,13 @@ def stem_words(words):
 
 
 class Preprocessor(object):
-    ALL_OPTIONS = 'htmlunescape lowercase strip_punct stem'.split()
+    ALL_OPTIONS = 'htmlunescape lowercase strip_punct stem split_chars'.split()
+    ALL_OPTIONS_DASHDASH = ['--%s' % x for x in ALL_OPTIONS]
 
     @classmethod
     def parse_options(cls, string):
         parser = PassThroughOptionParser()
-        for opt in PREPROCESSING_BINARY_OPTS:
+        for opt in cls.ALL_OPTIONS_DASHDASH:
             parser.add_option(opt, action='store_true')
         options, args = parser.parse_args(string.split())
         return options.__dict__
@@ -1141,12 +1139,13 @@ class Preprocessor(object):
     def to_options(self):
         return ['--%s' % opt for opt in self.ALL_OPTIONS if getattr(self, opt, None)]
 
-    def __init__(self, htmlunescape=False, lowercase=False, strip_punct=False, stem=False, replace_currency=False, replace_numbers=False, normalize_space=True, **ignored):
+    def __init__(self, htmlunescape=False, lowercase=False, strip_punct=False, stem=False, split_chars=False, normalize_space=True, **ignored):
         self.normalize_space = normalize_space
         self.htmlunescape = htmlunescape
         self.lowercase = lowercase
         self.strip_punct = strip_punct
         self.stem = stem
+        self.split_chars = split_chars
         if self.stem:
             stem_words(["testing"])
             self.lowercase = True
@@ -1181,7 +1180,12 @@ class Preprocessor(object):
             if self.stem:
                 words = stem_words(words)
 
-            text = u' '.join(words)
+            if self.split_chars:
+                words = [' '.join(w) for w in words]
+                text = u' __ '.join(words)
+            else:
+                text = u' '.join(words)
+
             return text.encode('utf-8')
         except Exception:
             sys.stderr.write('Failed to process\norig=%r\ntext=%r\n' % (orig, text))
@@ -1623,7 +1627,7 @@ def main_tune(metric, config, source, format, args, preprocessor_base, nfolds, i
     best_result = None
     already_done = {}
 
-    preprocessor_variants = list(expand(args, only=PREPROCESSING_BINARY_OPTS))
+    preprocessor_variants = list(expand(args, only=Preprocessor.ALL_OPTIONS_DASHDASH))
     log('Trying preprocessor variants: %s', pprint.pformat(preprocessor_variants), log_level=-1)
 
     for my_args in preprocessor_variants:
@@ -1662,7 +1666,7 @@ def main_tune(metric, config, source, format, args, preprocessor_base, nfolds, i
         for fname in folds:
             assert os.path.exists(fname), fname
 
-        vw_args = [x for x in my_args if x not in PREPROCESSING_BINARY_OPTS]
+        vw_args = [x for x in my_args if x not in Preprocessor.ALL_OPTIONS_DASHDASH]
 
         try:
             this_best_result, this_best_options = vw_optimize_over_cv(
