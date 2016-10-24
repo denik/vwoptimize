@@ -14,6 +14,7 @@ import time
 import heapq
 import json
 import pprint
+from collections import deque
 from pipes import quote
 import numpy as np
 
@@ -190,10 +191,15 @@ class PassThroughOptionParser(optparse.OptionParser):
                 largs.append(e.opt_str)
 
 
-def system(cmd, log_level=0, stdin=None):
+def system(cmd, log_level=1, stdin=None):
+    if isinstance(cmd, deque):
+        for item in cmd:
+            system(item, log_level=log_level, stdin=stdin)
+        return
+
     sys.stdout.flush()
     start = time.time()
-    log('+ %s' % cmd, log_level=log_level)
+    log('+ %s', cmd, log_level=log_level)
 
     if stdin is not None:
         popen = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE)
@@ -316,30 +322,125 @@ def Popen(cmd, *args, **kwargs):
 
 def run_subprocesses(cmds, workers=None, log_level=None):
     workers = _workers(workers)
-    cmds_queue = list(cmds)
-    cmds_queue.reverse()
-    queue = []
-    while queue or cmds_queue:
-        if cmds_queue and len(queue) <= workers:
-            cmd = cmds_queue.pop()
-            popen = Popen(cmd, shell=True)
-            popen._cmd = cmd
-            queue.append(popen)
-        else:
-            popen = queue[0]
-            del queue[0]
-            retcode = popen.wait()
-            if retcode:
-                log('failed: %s', popen._cmd, log_level=3)
-                kill(*queue, verbose=True)
-                return False
+    cmds_queue = deque(cmds)
+    queue = deque()
+    success = False
+    try:
+        while queue or cmds_queue:
+            if cmds_queue and len(queue) <= workers:
+                cmd = cmds_queue.popleft()
+
+                if isinstance(cmd, deque):
+                    this_cmd = cmd.popleft()
+                    # run the first one, put the rest into 'followup' attribute, to be picked up after this finishes
+                    popen = Popen(this_cmd, shell=True)
+                    popen._cmd = this_cmd
+                    popen._followup = cmd
+                else:
+                    popen = Popen(cmd, shell=True)
+                    popen._cmd = cmd
+
+                queue.append(popen)
             else:
-                log('%s %s', '-' if retcode == 0 else '!', popen._cmd, log_level=log_level)
+                popen = queue.popleft()
+                retcode = popen.wait()
+                if retcode:
+                    log('failed: %s', popen._cmd, log_level=3)
+                    break
+                else:
+                    log('%s %s', '-' if retcode == 0 else '!', popen._cmd, log_level=log_level)
 
-    return True
+                followup = getattr(popen, '_followup', None)
+                if followup:
+                    cmds_queue.append(followup)
+
+        success = True
+
+    finally:
+        if not success:
+            kill(*queue, verbose=True)
+
+    return success
 
 
-def vw_cross_validation(folds, vw_args, workers=None, p_fname=None, r_fname=None, audit=False):
+def _add_temp_cache_file(to_cleanup, args):
+    if '-c' in args and '--cache_file' not in args:
+        args = args.replace('-c', '')
+        cache_file = get_temp_filename('cache')
+        args += ' --cache_file %s' % cache_file
+        to_cleanup.append(cache_file)
+    return args
+
+
+def get_vw_train_command(to_cleanup, trainset, model_filename, vw_args, feature_mask_retrain=None, readable_model=None):
+    data_filename = ''
+    data_pipeline = ''
+
+    if trainset is None:
+        pass
+    elif isinstance(trainset, basestring):
+        if '|' in trainset:
+            data_pipeline = trainset
+            if not data_pipeline.strip().endswith('|'):
+                data_pipeline += ' |'
+        else:
+            assert os.path.exists(trainset), trainset
+            data_filename = '-d %s' % trainset
+    elif isinstance(trainset, list):
+        assert trainset and os.path.exists(trainset[0]), trainset
+        data_pipeline = 'cat %s |' % ' '.join(quote(x) for x in trainset)
+    else:
+        raise TypeError('Expected string or list, not %r' % (trainset, ))
+
+    if feature_mask_retrain:
+        if model_filename:
+            intermediate_model_filename = model_filename + '.feature_mask'
+        else:
+            intermediate_model_filename = get_temp_filename('feature_mask')
+        to_cleanup.append(intermediate_model_filename)
+    else:
+        intermediate_model_filename = model_filename
+
+    final_options = []
+
+    if readable_model:
+        final_options += ['--readable_model', readable_model]
+
+    training_command = [
+        data_pipeline,
+        VW_CMD,
+        data_filename,
+        '-f %s' % intermediate_model_filename if intermediate_model_filename else '',
+        _add_temp_cache_file(to_cleanup, vw_args)
+    ]
+
+    if not feature_mask_retrain:
+        return ' '.join(x for x in training_command + final_options if x)
+
+    if isinstance(feature_mask_retrain, bool):
+        feature_mask_retrain = ''
+    else:
+        if not isinstance(feature_mask_retrain, basestring):
+            raise TypeError('feature_mask_retrain must be bool or str, not %r' % (feature_mask_retrain, ))
+
+    assert '--feature_mask' not in vw_args, vw_args
+
+    return deque([
+        ' '.join(x for x in training_command if x),
+        ' '.join(x for x in [
+            data_pipeline,
+            VW_CMD,
+            data_filename,
+            '--quiet' if '--quiet' in vw_args else '',
+            '-f %s' % model_filename if model_filename else '',
+            '--feature_mask %s' % intermediate_model_filename,
+            '-i %s' % intermediate_model_filename,
+            _add_temp_cache_file(to_cleanup, feature_mask_retrain)
+        ] + final_options if x),
+    ])
+
+
+def vw_cross_validation(folds, vw_args, workers=None, p_fname=None, r_fname=None, audit=False, feature_mask_retrain=False, calc_num_features=False):
     assert len(folds) >= 2, folds
     workers = _workers(workers)
     p_filenames = []
@@ -348,20 +449,30 @@ def vw_cross_validation(folds, vw_args, workers=None, p_fname=None, r_fname=None
     training_commands = []
     testing_commands = []
     models = []
+    readable_models = []
     to_cleanup = []
 
     if '--quiet' not in vw_args:
         vw_args += ' --quiet'
 
     # verify that the the options are valid and the file format is not completely off
-    training_command = 'head -n 10 %s | vw %s' % (folds[0], vw_args)
-    if os.system(training_command) != 0:
-        sys.exit(1)
+    testmodel = get_temp_filename('testmodel')
+    to_cleanup.append(testmodel)
+
+    arguments_check_command = get_vw_train_command(
+        to_cleanup,
+        'head -n 2 %s |' % folds[0],
+        testmodel,
+        vw_args,
+        feature_mask_retrain=feature_mask_retrain)
+
+    system(arguments_check_command, log_level=-1)
+    if not os.path.exists(testmodel):
+        sys.exit('Failed during arguments check:\n%s\n' % arguments_check_command)
 
     for test_fold in xrange(len(folds)):
         trainset = [fold for (index, fold) in enumerate(folds) if index != test_fold]
         assert trainset and os.path.exists(trainset[0]), trainset
-        trainset = ' '.join(trainset)
         testset = folds[test_fold]
         assert testset and os.path.exists(testset), testset
 
@@ -383,13 +494,6 @@ def vw_cross_validation(folds, vw_args, workers=None, p_fname=None, r_fname=None
 
         my_args = vw_args
 
-        cache_file = None
-        if '-c' in my_args.split() and '--cache_file' not in my_args:
-            my_args = my_args.replace('-c', '')
-            cache_file = get_temp_filename('cache')
-            my_args += ' --cache_file %s' % cache_file
-            to_cleanup.append(cache_file)
-
         if audit:
             audit_filename = '%s.audit' % model_filename
             audit = '-a > %s' % audit_filename
@@ -398,12 +502,19 @@ def vw_cross_validation(folds, vw_args, workers=None, p_fname=None, r_fname=None
             audit_filename = ''
             audit = ''
 
-        training_command = 'cat %s | %s -f %s %s' % (trainset, VW_CMD, model_filename, my_args)
+        if calc_num_features:
+            readable_model = model_filename + '.readable'
+            readable_models.append(readable_model)
+        else:
+            readable_model = None
+
+        training_command = get_vw_train_command(to_cleanup, trainset, model_filename, my_args, feature_mask_retrain=feature_mask_retrain, readable_model=readable_model)
         testing_command = '%s --quiet -d %s -t -i %s %s %s %s' % (VW_CMD, testset, model_filename, with_p, with_r, audit)
         training_commands.append(training_command)
         testing_commands.append(testing_command)
 
     try:
+
         success = run_subprocesses(training_commands, workers=workers, log_level=-1)
 
         for name in models:
@@ -426,7 +537,9 @@ def vw_cross_validation(folds, vw_args, workers=None, p_fname=None, r_fname=None
         if r_fname and r_filenames:
             system('cat %s > %s' % (' '.join(r_filenames), r_fname), log_level=-1)
 
-        return np.array(predictions)
+        num_features = [get_num_features(name) for name in readable_models]
+
+        return np.array(predictions), num_features
 
     finally:
         unlink(*p_filenames)
@@ -434,6 +547,19 @@ def vw_cross_validation(folds, vw_args, workers=None, p_fname=None, r_fname=None
         unlink(*audit_filenames)
         unlink(*to_cleanup)
         unlink(*models)
+        unlink(*readable_models)
+
+
+def get_num_features(filename):
+    counting = False
+    count = 0
+    for line in open(filename):
+        if counting:
+            count += 1
+        else:
+            if line.strip() == ':0':
+                counting = True
+    return count
 
 
 def _load_first_float_from_each_string(file, size=None):
@@ -756,7 +882,8 @@ def get_tuning_config(config):
 
 
 def vw_optimize_over_cv(vw_source, folds, args, metric, config,
-                        predictions_filename=None, raw_predictions_filename=None, workers=None, other_metrics=[]):
+                        predictions_filename=None, raw_predictions_filename=None, workers=None, other_metrics=[],
+                        feature_mask_retrain=False, show_num_features=False):
     # we only depend on scipy if parameter tuning is enabled
     import scipy.optimize
 
@@ -814,12 +941,14 @@ def vw_optimize_over_cv(vw_source, folds, args, metric, config,
 
         try:
             # XXX use return value
-            vw_cross_validation(
+            cv_pred, num_features = vw_cross_validation(
                 folds,
                 args,
                 workers=workers,
                 p_fname=predictions_filename_tmp,
-                r_fname=raw_predictions_filename_tmp)
+                r_fname=raw_predictions_filename_tmp,
+                feature_mask_retrain=feature_mask_retrain,
+                calc_num_features=show_num_features)
         except BaseException, ex:
             if type(ex) is not SystemExit:
                 traceback.print_exc()
@@ -847,6 +976,10 @@ def vw_optimize_over_cv(vw_source, folds, args, metric, config,
         unlink(predictions_filename_tmp, raw_predictions_filename_tmp)
 
         other_results = ' '.join(['%s=%s' % (m, _frmt_score_short(calculate_score(m, y_true, y_pred, config))) for m in other_metrics])
+
+        if num_features:
+            other_results += ' num_features=%s' % np.mean(num_features)
+
         if other_results:
             other_results = '  ' + other_results
 
@@ -1473,7 +1606,7 @@ def calculate_score(metric, y_true, y_pred, config):
         sys.exit('Unknown metric: %r' % metric)
 
 
-def main_tune(metric, config, source, format, args, preprocessor_base, nfolds, ignoreheader, workers):
+def main_tune(metric, config, source, format, args, preprocessor_base, nfolds, ignoreheader, workers, feature_mask_retrain, show_num_features):
     if preprocessor_base is None:
         preprocessor_base = []
     else:
@@ -1539,7 +1672,9 @@ def main_tune(metric, config, source, format, args, preprocessor_base, nfolds, i
                 optimization_metric,
                 config,
                 workers=workers,
-                other_metrics=other_metrics)
+                other_metrics=other_metrics,
+                feature_mask_retrain=feature_mask_retrain,
+                show_num_features=show_num_features)
         finally:
             unlink(*folds)
 
@@ -1689,6 +1824,7 @@ def main(to_cleanup):
     parser.add_option('-r', '--raw_predictions')
     parser.add_option('-p', '--predictions')
     parser.add_option('-f', '--final_regressor')
+    parser.add_option('--readable_model')
     parser.add_option('-i', '--initial_regressor')
     parser.add_option('-d', '--data')
     parser.add_option('-a', '--audit', action='store_true')
@@ -1723,6 +1859,8 @@ def main(to_cleanup):
 
     # extra
     parser.add_option('--vw')
+    parser.add_option('--feature_mask_retrain', action='store_true')
+    parser.add_option('--feature_mask_retrain_args')
 
     options, args = parser.parse_args()
 
@@ -1732,6 +1870,9 @@ def main(to_cleanup):
     if options.parseaudit:
         parseaudit(sys.stdin)
         sys.exit(0)
+
+    if options.feature_mask_retrain_args:
+        options.feature_mask_retrain = options.feature_mask_retrain_args
 
     config = {}
 
@@ -1834,8 +1975,20 @@ def main(to_cleanup):
             need_tuning = 1
             break
 
+    options.metric = _make_proper_list(options.metric) or []
+    show_num_features = 'num_features' in options.metric
+    options.metric = [x for x in options.metric if 'num_features' != x]
+
     can_do_streaming = True
-    if config.get('n_classes') == 0 or options.metric or options.cv or options.toperrors or need_tuning or options.savefeatures or options.tovw or options.tovw_simple:
+    if (config.get('n_classes') == 0 or
+            options.metric or
+            options.cv or
+            options.toperrors or
+            need_tuning or
+            options.savefeatures or
+            options.tovw or
+            options.tovw_simple or
+            options.feature_mask_retrain):
         can_do_streaming = False
 
     if can_do_streaming:
@@ -1912,8 +2065,6 @@ def main(to_cleanup):
             workers=options.workers)
         sys.exit(0)
 
-    options.metric = _make_proper_list(options.metric) or []
-
     if options.report:
         if not options.metric:
             options.metric = ['mse']
@@ -1961,7 +2112,9 @@ def main(to_cleanup):
             preprocessor_base=preprocessor,
             nfolds=options.nfolds,
             ignoreheader=options.ignoreheader,
-            workers=options.workers)
+            workers=options.workers,
+            feature_mask_retrain=options.feature_mask_retrain,
+            show_num_features=show_num_features)
         assert config['vw_train_options'], config
         config['preprocessor'] = str(preprocessor)
     else:
@@ -2001,19 +2154,23 @@ def main(to_cleanup):
                 cv_predictions = get_temp_filename('cvpred')
                 to_cleanup.append(cv_predictions)
 
-            cv_pred = vw_cross_validation(
+            cv_pred, num_features = vw_cross_validation(
                 folds,
                 config['vw_train_options'],
                 workers=options.workers,
                 p_fname=cv_predictions,
                 r_fname=options.raw_predictions,
-                audit=options.audit)
+                audit=options.audit,
+                feature_mask_retrain=options.feature_mask_retrain,
+                calc_num_features=show_num_features)
 
             assert y_true is not None
 
             for metric in options.metric:
                 value = calculate_score(metric, y_true, cv_pred, config)
                 print 'cv %s: %s' % (metric, _frmt_score(value))
+            if show_num_features and num_features:
+                print 'cv num_features: %s' % np.mean(num_features)
 
         finally:
             unlink(*folds)
@@ -2052,20 +2209,19 @@ def main(to_cleanup):
         to_cleanup.append(final_regressor_tmp)
 
     if final_regressor_tmp or not (options.cv or need_tuning):
-        vw_cmd = '%s %s' % (VW_CMD, config['vw_train_options'])
+        vw_args = config['vw_train_options']
+
+        data_filename = None
 
         if isinstance(vw_source, basestring):
             assert os.path.exists(vw_source), vw_source
-            vw_cmd += ' -d %s' % (vw_source, )
+            data_filename = vw_source
             vw_stdin = None
         else:
             vw_stdin = vw_source.getvalue()
 
         if options.initial_regressor:
-            vw_cmd += ' -i %s' % options.initial_regressor
-
-        if final_regressor_tmp:
-            vw_cmd += ' -f %s' % final_regressor_tmp
+            vw_args += ' -i %s' % options.initial_regressor
 
         predictions_fname = options.predictions
 
@@ -2075,15 +2231,30 @@ def main(to_cleanup):
                 to_cleanup.append(predictions_fname)
 
         if predictions_fname:
-            vw_cmd += ' -p %s' % predictions_fname
+            vw_args += ' -p %s' % predictions_fname
 
         if options.raw_predictions:
-            vw_cmd += ' -r %s' % options.raw_predictions
+            vw_args += ' -r %s' % options.raw_predictions
 
         if options.audit:
-            vw_cmd += ' -a'
+            vw_args += ' -a'
 
-        system(vw_cmd, log_level=0, stdin=vw_stdin)
+        if options.readable_model:
+            readable_model = options.readable_model
+        elif show_num_features:
+            readable_model = get_temp_filename('readable_model')
+            to_cleanup.append(readable_model)
+        else:
+            readable_model = None
+
+        if '-t' not in vw_args.split():
+            vw_cmd = get_vw_train_command(to_cleanup, data_filename, final_regressor_tmp, vw_args, feature_mask_retrain=options.feature_mask_retrain, readable_model=readable_model)
+        else:
+            vw_cmd = '%s %s' % (VW_CMD, vw_args)
+            if data_filename:
+                vw_cmd += ' -d %s' % data_filename
+
+        system(vw_cmd, stdin=vw_stdin)
 
         y_pred = None
 
@@ -2093,6 +2264,9 @@ def main(to_cleanup):
 
             for metric in options.metric:
                 print '%s: %s' % (metric, _frmt_score(calculate_score(metric, y_true, y_pred, config)))
+
+            if show_num_features and readable_model:
+                print 'num_features: %s' % get_num_features(readable_model)
 
         if options.toperrors:
             assert y_true is not None
