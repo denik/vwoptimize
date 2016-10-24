@@ -23,6 +23,7 @@ LOG_LEVEL = 1
 MAIN_PID = str(os.getpid())
 KEEPTMP = False
 STDIN_NAMES = ('/dev/stdin', '-')
+VW_CMD = 'vw'
 
 
 for path in '.vwoptimize /tmp/vwoptimize'.split():
@@ -397,8 +398,8 @@ def vw_cross_validation(folds, vw_args, workers=None, p_fname=None, r_fname=None
             audit_filename = ''
             audit = ''
 
-        training_command = 'cat %s | vw -f %s %s' % (trainset, model_filename, my_args)
-        testing_command = 'vw --quiet -d %s -t -i %s %s %s %s' % (testset, model_filename, with_p, with_r, audit)
+        training_command = 'cat %s | %s -f %s %s' % (trainset, VW_CMD, model_filename, my_args)
+        testing_command = '%s --quiet -d %s -t -i %s %s %s %s' % (VW_CMD, testset, model_filename, with_p, with_r, audit)
         training_commands.append(training_command)
         testing_commands.append(testing_command)
 
@@ -407,13 +408,13 @@ def vw_cross_validation(folds, vw_args, workers=None, p_fname=None, r_fname=None
 
         for name in models:
             if not os.path.exists(name):
-                sys.exit('vw failed to write a model')
+                sys.exit('%s failed to write a model' % VW_CMD)
 
         if success:
             success = run_subprocesses(testing_commands, workers=workers, log_level=-1)
 
         if not success:
-            sys.exit('vw failed')
+            sys.exit('%s failed' % VW_CMD)
 
         predictions = []
         for fname in p_filenames:
@@ -809,7 +810,7 @@ def vw_optimize_over_cv(vw_source, folds, args, metric, config,
         if args in cache:
             return cache[args]
 
-        log('Trying vw %s...', args)
+        log('Trying %s %s...', VW_CMD, args)
 
         try:
             # XXX use return value
@@ -820,8 +821,9 @@ def vw_optimize_over_cv(vw_source, folds, args, metric, config,
                 p_fname=predictions_filename_tmp,
                 r_fname=raw_predictions_filename_tmp)
         except BaseException, ex:
-            log(str(ex))
-            log('Result vw %s... error', args, log_level=1)
+            if type(ex) is not SystemExit:
+                traceback.print_exc()
+            log('Result %s %s... error: %s', VW_CMD, args, ex, log_level=1)
             cache[args] = 0.0
             return 0.0
 
@@ -848,7 +850,7 @@ def vw_optimize_over_cv(vw_source, folds, args, metric, config,
         if other_results:
             other_results = '  ' + other_results
 
-        log('Result vw %s... %s=%s%s%s', args, metric, _frmt_score_short(result), is_best, other_results, log_level=1 + bool(is_best))
+        log('Result %s %s... %s=%s%s%s', VW_CMD, args, metric, _frmt_score_short(result), is_best, other_results, log_level=1 + bool(is_best))
 
         cache[args] = result
         return result
@@ -1616,7 +1618,7 @@ def parseaudit(source):
 
 
 def main_streaming(source, format, columnspec, vw_args, vw_options, preprocessor, labels, weights, ignoreheader):
-    vw_cmd = 'vw %s' % vw_args
+    vw_cmd = '%s %s' % (VW_CMD, vw_args)
 
     if vw_options.initial_regressor:
         assert ' -i ' not in vw_cmd, vw_cmd
@@ -1719,6 +1721,9 @@ def main(to_cleanup):
     parser.add_option('--savefeatures')
     parser.add_option('--parseaudit', action='store_true')
 
+    # extra
+    parser.add_option('--vw')
+
     options, args = parser.parse_args()
 
     globals()['LOG_LEVEL'] += options.lesslogs - options.morelogs
@@ -1738,6 +1743,11 @@ def main(to_cleanup):
             options.initial_regressor = os.path.normpath(os.path.join(os.path.dirname(options.readconfig), config['regressor']))
             if not os.path.exists(options.initial_regressor):
                 sys.exit('Cannot find %r referenced from %r' % (options.initial_regressor, options.readconfig))
+
+        globals()['VW_CMD'] = config.get('vw') or VW_CMD
+
+    if options.vw:
+        globals()['VW_CMD'] = options.vw
 
     used_stdin = False
     if options.data is None or options.data in STDIN_NAMES:
@@ -2024,6 +2034,8 @@ def main(to_cleanup):
         if final_regressor:
             config['regressor'] = os.path.relpath(final_regressor, os.path.dirname(options.writeconfig))
 
+        config['vw'] = VW_CMD
+
         config_tmp_filename = options.writeconfig + '.tmp'
         to_cleanup.append(config_tmp_filename)
         output_fobj = open(config_tmp_filename, 'w')
@@ -2040,7 +2052,7 @@ def main(to_cleanup):
         to_cleanup.append(final_regressor_tmp)
 
     if final_regressor_tmp or not (options.cv or need_tuning):
-        vw_cmd = 'vw %s' % config['vw_train_options']
+        vw_cmd = '%s %s' % (VW_CMD, config['vw_train_options'])
 
         if isinstance(vw_source, basestring):
             assert os.path.exists(vw_source), vw_source
@@ -2120,7 +2132,7 @@ def main(to_cleanup):
         os.rename(config_tmp_filename, options.writeconfig)
 
     if options.savefeatures:
-        vw_cmd = 'vw'
+        vw_cmd = VW_CMD
 
         if isinstance(vw_source, basestring):
             assert os.path.exists(vw_source), vw_source
