@@ -1618,9 +1618,9 @@ def parseaudit(source):
 def main_streaming(source, format, columnspec, vw_args, vw_options, preprocessor, labels, weights, ignoreheader):
     vw_cmd = 'vw %s' % vw_args
 
-    if vw_options.input_regressor:
+    if vw_options.initial_regressor:
         assert ' -i ' not in vw_cmd, vw_cmd
-        vw_cmd += ' -i %s' % vw_options.input_regressor
+        vw_cmd += ' -i %s' % vw_options.initial_regressor
 
     if vw_options.final_regressor:
         vw_cmd += ' -f %s' % vw_options.final_regressor
@@ -1687,7 +1687,7 @@ def main(to_cleanup):
     parser.add_option('-r', '--raw_predictions')
     parser.add_option('-p', '--predictions')
     parser.add_option('-f', '--final_regressor')
-    parser.add_option('-i', '--input_regressor')
+    parser.add_option('-i', '--initial_regressor')
     parser.add_option('-d', '--data')
     parser.add_option('-a', '--audit', action='store_true')
     parser.add_option('--readconfig')
@@ -1734,10 +1734,10 @@ def main(to_cleanup):
         config = json.load(open(options.readconfig))
         log('vwoptimize config = %s', options.readconfig, log_level=1)
 
-        if 'regressor' in config and not options.input_regressor:
-            options.input_regressor = os.path.normpath(os.path.join(os.path.dirname(options.readconfig), config['regressor']))
-            if not os.path.exists(options.input_regressor):
-                sys.exit('Cannot find %r referenced from %r' % (options.input_regressor, options.readconfig))
+        if 'regressor' in config and not options.initial_regressor:
+            options.initial_regressor = os.path.normpath(os.path.join(os.path.dirname(options.readconfig), config['regressor']))
+            if not os.path.exists(options.initial_regressor):
+                sys.exit('Cannot find %r referenced from %r' % (options.initial_regressor, options.readconfig))
 
     used_stdin = False
     if options.data is None or options.data in STDIN_NAMES:
@@ -1940,7 +1940,7 @@ def main(to_cleanup):
         index += 1
 
     if need_tuning:
-        # QQQ --input_regressor is not passed there
+        # QQQ --initial_regressor is not passed there
         assert not options.audit, '-a incompatible with parameter tuning'
         config['vw_train_options'], preprocessor = main_tune(
             metric=options.metric,
@@ -1978,7 +1978,7 @@ def main(to_cleanup):
         vw_source = vw_filename
 
     if options.cv:
-        # QQQ --input_regressor is not passed there
+        # QQQ --initial_regressor is not passed there
         # XXX we could skip --cv here if we make main_tune() keep final predictions and raw_predictions for us
         folds = []
         try:
@@ -2049,8 +2049,8 @@ def main(to_cleanup):
         else:
             vw_stdin = vw_source.getvalue()
 
-        if options.input_regressor:
-            vw_cmd += ' -i %s' % options.input_regressor
+        if options.initial_regressor:
+            vw_cmd += ' -i %s' % options.initial_regressor
 
         if final_regressor_tmp:
             vw_cmd += ' -f %s' % final_regressor_tmp
@@ -2129,7 +2129,7 @@ def main(to_cleanup):
         else:
             vw_stdin = vw_source.getvalue()
 
-        regressor = final_regressor or options.input_regressor
+        regressor = final_regressor or options.initial_regressor
 
         assert regressor
         vw_cmd += ' -i %s -t -a' % regressor
