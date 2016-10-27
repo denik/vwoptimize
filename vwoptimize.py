@@ -128,6 +128,25 @@ def log(s, *params, **kwargs):
         sys.stderr.write('%s\n' % (s, ))
 
 
+def flush_and_close(fileobj):
+    fileobj.flush()
+    try:
+        os.fsync(fileobj.fileno())
+    except OSError:
+        pass
+    fileobj.close()
+
+
+def write_file(filename, data):
+    if isinstance(data, list):
+        data = ''.join(data)
+    else:
+        assert isinstance(data, str), type(data)
+    fobj = open(filename, 'w')
+    fobj.write(data)
+    flush_and_close(fobj)
+
+
 def get_format_from_filename(filename):
     items = filename.lower().split('.')
 
@@ -259,9 +278,7 @@ def split_file(source, nfolds=None, ignoreheader=False, log_level=0, minfolds=1)
     for line in source:
         if count >= foldsize:
             if current_fileobj is not None:
-                current_fileobj.flush()
-                os.fsync(current_fileobj.fileno())
-                current_fileobj.close()
+                flush_and_close(current_fileobj)
                 current_fileobj = None
             current_fold += 1
             if current_fold >= nfolds:
@@ -275,9 +292,7 @@ def split_file(source, nfolds=None, ignoreheader=False, log_level=0, minfolds=1)
         total_count += 1
 
     if current_fileobj is not None:
-        current_fileobj.flush()
-        os.fsync(current_fileobj.fileno())
-        current_fileobj.close()
+        flush_and_close(current_fileobj)
 
     if total_count != total_lines:
         sys.exit('internal error: total_count=%r total_lines=%r source=%r' % (total_count, total_lines, source))
