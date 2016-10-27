@@ -12,8 +12,8 @@ before_install:
  - vw --version
 install:
  - pip install -r requirements.txt
- - pip install flake8
+ - pip install flake8 shelldoctest
 script:
  - python -c 'import vwoptimize, doctest; doctest.testmod(vwoptimize)'
- - cd tests && python -m unittest discover -v && cd ..
+ - cd tests && shell-doctest --verbose=2 test && cd ..
  - flake8 --max-line-length=180 . --ignore E402

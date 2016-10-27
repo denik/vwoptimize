@@ -14,6 +14,7 @@ import time
 import heapq
 import json
 import pprint
+from itertools import izip_longest
 from collections import deque
 from pipes import quote
 import numpy as np
@@ -21,10 +22,13 @@ import numpy as np
 
 csv.field_size_limit(10000000)
 LOG_LEVEL = 1
-MAIN_PID = str(os.getpid())
+TMP_START = str(os.getpid())
 KEEPTMP = False
 STDIN_NAMES = ('/dev/stdin', '-')
+STDOUT_NAMES = ('/dev/stdout', 'stdout')
 VW_CMD = 'vw'
+VOWPAL_WABBIT_ERRORS = "error|won't work right|errno|can't open|vw::vw_exception"
+DEFAULT_COLUMNSPEC = 'y,text,*'
 
 
 for path in '.vwoptimize /tmp/vwoptimize'.split():
@@ -111,7 +115,7 @@ def get_real_ext(filename):
 
 def get_temp_filename(suffix, counter=[0]):
     counter[0] += 1
-    fname = '%s/%s.%s.%s' % (TMP_PREFIX, MAIN_PID, counter[0], suffix)
+    fname = '%s/%s.%s.%s' % (TMP_PREFIX, TMP_START, counter[0], suffix)
     assert not os.path.exists(fname), 'internal error: %s' % fname
     return fname
 
@@ -126,6 +130,18 @@ def log(s, *params, **kwargs):
         except Exception:
             s = '%s %r' % (s, params)
         sys.stderr.write('%s\n' % (s, ))
+
+
+def log_always(*args, **kwargs):
+    kwargs['log_level'] = LOG_LEVEL
+    return log(*args, **kwargs)
+
+
+def vw_failed(msg=''):
+    if msg:
+        sys.exit('%s failed: %s' % (VW_CMD, msg))
+    else:
+        sys.exit('%s failed' % (VW_CMD, ))
 
 
 def flush_and_close(fileobj):
@@ -161,7 +177,7 @@ def _read_lines_vw(fobj):
             continue
         items = orig_line.split('|')
         if len(items) <= 1:
-            continue
+            sys.exit('Bad line: %r' % (orig_line, ))
         prefix_items = items[0].strip().split()
         if not prefix_items or not prefix_items or prefix_items[0].startswith("'"):
             yield (None, orig_line)
@@ -210,30 +226,34 @@ class PassThroughOptionParser(optparse.OptionParser):
                 largs.append(e.opt_str)
 
 
-def system(cmd, log_level=1, stdin=None):
+def system(cmd, log_level=1):
     if isinstance(cmd, deque):
         for item in cmd:
-            system(item, log_level=log_level, stdin=stdin)
+            system(item, log_level=log_level)
         return
 
     sys.stdout.flush()
     start = time.time()
-    log('+ %s', cmd, log_level=log_level)
 
-    if stdin is not None:
-        popen = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE)
-        popen.communicate(stdin)
-        retcode = popen.wait()
+    popen = Popen(cmd, shell=True, log_level=log_level)
+
+    if popen.stdout is not None or popen.stderr is not None:
+        out, err = popen.communicate()
     else:
-        retcode = os.system(cmd)
+        out, err = '', ''
+
+    retcode = popen.wait()
 
     if retcode:
         log('%s [%.1fs] %s', '-' if retcode == 0 else '!', time.time() - start, cmd, log_level=log_level - 1)
+
     if retcode:
         sys.exit(1)
 
+    return (out or '') + (err or '')
 
-def split_file(source, nfolds=None, ignoreheader=False, log_level=0, minfolds=1):
+
+def split_file(source, nfolds=None, ignoreheader=False, log_level=0, minfoldsize=10000):
     if nfolds is None:
         nfolds = 10
 
@@ -260,14 +280,8 @@ def split_file(source, nfolds=None, ignoreheader=False, log_level=0, minfolds=1)
         total_lines -= 1
 
     foldsize = int(math.ceil(total_lines / float(nfolds)))
-    foldsize = max(foldsize, 1)
-    orig_nfolds = nfolds
+    foldsize = max(foldsize, minfoldsize)
     nfolds = int(math.ceil(total_lines / float(foldsize)))
-    if nfolds != orig_nfolds:
-        log('Reduced number of folds from %r to %r', orig_nfolds, nfolds, log_level=1 + log_level)
-
-    if minfolds is not None and nfolds <= minfolds:
-        sys.exit('Too few folds: %r' % nfolds)
 
     folds = []
 
@@ -305,7 +319,7 @@ def _workers(workers):
         return 1
     if workers is None or workers <= 0:
         import multiprocessing
-        return multiprocessing.cpu_count()
+        return 1 + multiprocessing.cpu_count()
     return workers
 
 
@@ -325,21 +339,48 @@ def die_if_parent_dies(signum=9):
         sys.stderr.write(str(ex) + '\n')
 
 
-def Popen(cmd, *args, **kwargs):
-    kwargs.setdefault('preexec_fn', die_if_parent_dies)
-    command = cmd
-    if not isinstance(command, basestring):
-        command = ' '.join(command)
-    log('+ %s', command)
-    popen = subprocess.Popen(cmd, *args, **kwargs)
+def Popen(params, **kwargs):
+
+    if isinstance(params, dict):
+        params = params.copy()
+        args = params.pop('args')
+        params.update(kwargs)
+    else:
+        args = params
+        params = kwargs
+
+    log_level = params.pop('log_level', 0)
+    params.setdefault('preexec_fn', die_if_parent_dies)
+
+    if isinstance(args, list):
+        command = ' '.join(args)
+    else:
+        command = args
+
+    name = params.pop('name', None)
+    if name:
+        log('+ [%s] %s', name, command, log_level=log_level)
+    else:
+        log('+ %s', command, log_level=log_level)
+
+    popen = subprocess.Popen(args, **params)
     return popen
 
 
 def run_subprocesses(cmds, workers=None, log_level=None):
+    for item in cmds:
+        if isinstance(item, deque):
+            for subitem in item:
+                assert isinstance(subitem, dict), subitem
+        else:
+            assert isinstance(item, dict), item
+
     workers = _workers(workers)
     cmds_queue = deque(cmds)
     queue = deque()
     success = False
+    outputs = {}
+
     try:
         while queue or cmds_queue:
             if cmds_queue and len(queue) <= workers:
@@ -347,27 +388,34 @@ def run_subprocesses(cmds, workers=None, log_level=None):
 
                 if isinstance(cmd, deque):
                     this_cmd = cmd.popleft()
-                    # run the first one, put the rest into 'followup' attribute, to be picked up after this finishes
-                    popen = Popen(this_cmd, shell=True)
-                    popen._cmd = this_cmd
-                    popen._followup = cmd
+                    followup = cmd
                 else:
-                    popen = Popen(cmd, shell=True)
-                    popen._cmd = cmd
+                    this_cmd = cmd
+                    followup = None
 
+                popen = Popen(this_cmd, shell=True)
+                popen._cmd = this_cmd
+                popen._name = this_cmd.get('name', '')
+                popen._followup = followup
                 queue.append(popen)
             else:
                 popen = queue.popleft()
+
+                if popen.stdout is not None or popen.stderr is not None:
+                    out, err = popen.communicate()
+                    out = (out or '') + (err or '')
+                    outputs.setdefault(popen._name, []).append(out)
+
                 retcode = popen.wait()
+
                 if retcode:
-                    log('failed: %s', popen._cmd, log_level=3)
-                    break
+                    log('failed: %s', popen._cmd.get('args', popen._cmd), log_level=3)
+                    return None, None
                 else:
                     log('%s %s', '-' if retcode == 0 else '!', popen._cmd, log_level=log_level)
 
-                followup = getattr(popen, '_followup', None)
-                if followup:
-                    cmds_queue.append(followup)
+                if popen._followup:
+                    cmds_queue.append(popen._followup)
 
         success = True
 
@@ -375,19 +423,17 @@ def run_subprocesses(cmds, workers=None, log_level=None):
         if not success:
             kill(*queue, verbose=True)
 
-    return success
+    return success, outputs
 
 
-def _add_temp_cache_file(to_cleanup, args):
-    if '-c' in args and '--cache_file' not in args:
-        args = args.replace('-c', '')
-        cache_file = get_temp_filename('cache')
-        args += ' --cache_file %s' % cache_file
-        to_cleanup.append(cache_file)
-    return args
+def _as_dict(lst, name):
+    if isinstance(lst, list):
+        lst = ' '.join(lst).strip()
+        lst = re.sub('\s+', ' ', lst)
+    return {'args': lst, 'shell': True, 'name': name}
 
 
-def get_vw_train_command(to_cleanup, trainset, model_filename, vw_args, feature_mask_retrain=None, readable_model=None):
+def get_vw_command(to_cleanup, trainset, model_filename, vw_args, feature_mask_retrain=None, readable_model=None, name=''):
     data_filename = ''
     data_pipeline = ''
 
@@ -421,16 +467,30 @@ def get_vw_train_command(to_cleanup, trainset, model_filename, vw_args, feature_
     if readable_model:
         final_options += ['--readable_model', readable_model]
 
+    vw_args = vw_args.split()
+
+    if '--cache_file' in vw_args:
+        sys.exit('Dont provide --cache_file, one will be added automatically.')
+
+    if '-c' in vw_args or '--cache_file' in vw_args:
+        remove_option(vw_args, '-c', 0)
+        remove_option(vw_args, '--cache_file', 1)
+        if model_filename:
+            cache_file = model_filename + '.cache'
+        else:
+            cache_file = get_temp_filename('cache')
+        vw_args.extend(['--cache_file', cache_file])
+        to_cleanup.append(cache_file)
+
     training_command = [
         data_pipeline,
         VW_CMD,
         data_filename,
-        '-f %s' % intermediate_model_filename if intermediate_model_filename else '',
-        _add_temp_cache_file(to_cleanup, vw_args)
-    ]
+        '-f %s' % intermediate_model_filename if intermediate_model_filename else ''
+    ] + vw_args
 
     if not feature_mask_retrain:
-        return ' '.join(x for x in training_command + final_options if x)
+        return deque([_as_dict(training_command + final_options, name=name)])
 
     if isinstance(feature_mask_retrain, bool):
         feature_mask_retrain = ''
@@ -438,131 +498,168 @@ def get_vw_train_command(to_cleanup, trainset, model_filename, vw_args, feature_
         if not isinstance(feature_mask_retrain, basestring):
             raise TypeError('feature_mask_retrain must be bool or str, not %r' % (feature_mask_retrain, ))
 
+    assert data_pipeline or data_filename
+
     assert '--feature_mask' not in vw_args, vw_args
 
+    feature_mask_retrain = feature_mask_retrain.split()
+
+    if '-c' in feature_mask_retrain or '--cache_file' in feature_mask_retrain:
+        remove_option(feature_mask_retrain, '-c', 0)
+        remove_option(feature_mask_retrain, '--cache_file', 0)
+        cache_file = model_filename + '.cache'
+        feature_mask_retrain.extend(['--cache_file', cache_file])
+        to_cleanup.append(cache_file)
+
     return deque([
-        ' '.join(x for x in training_command if x),
-        ' '.join(x for x in [
+        _as_dict(training_command, name=name + "1"),
+        _as_dict([
             data_pipeline,
             VW_CMD,
             data_filename,
             '--quiet' if '--quiet' in vw_args else '',
             '-f %s' % model_filename if model_filename else '',
             '--feature_mask %s' % intermediate_model_filename,
-            '-i %s' % intermediate_model_filename,
-            _add_temp_cache_file(to_cleanup, feature_mask_retrain)
-        ] + final_options if x),
+            '-i %s' % intermediate_model_filename] + feature_mask_retrain + final_options, name=name + "2"),
     ])
 
 
-def vw_cross_validation(folds, vw_args, workers=None, p_fname=None, r_fname=None, audit=False, feature_mask_retrain=False, calc_num_features=False):
-    assert len(folds) >= 2, folds
+def vw_cross_validation(
+        vw_filename,
+        nfolds,
+        vw_args,
+        workers=None,
+        with_predictions=False,
+        with_raw_predictions=False,
+        feature_mask_retrain=False,
+        calc_num_features=False,
+        capture_output=False):
+
+    if hasattr(capture_output, '__contains__') and '' in capture_output:
+        capture_output = True
+
     workers = _workers(workers)
+    commands = []
     p_filenames = []
     r_filenames = []
-    audit_filenames = []
-    training_commands = []
-    testing_commands = []
-    models = []
     readable_models = []
     to_cleanup = []
 
-    if '--quiet' not in vw_args:
-        vw_args += ' --quiet'
+    vw_args = vw_args.replace('--quiet', '')
 
-    # verify that the the options are valid and the file format is not completely off
-    testmodel = get_temp_filename('testmodel')
-    to_cleanup.append(testmodel)
+    # Split into folds is done like this (example for 3 folds)
+    # Example -> fold:
+    # 1 -> 1
+    # 2 -> 2
+    # 3 -> 3
+    # 4 -> 1
+    # and so on
 
-    arguments_check_command = get_vw_train_command(
-        to_cleanup,
-        'head -n 2 %s |' % folds[0],
-        testmodel,
-        vw_args,
-        feature_mask_retrain=feature_mask_retrain)
+    AWK_TRAINSET = "awk '(NR - $fold) % NFOLDS != 0' VW |".replace('NFOLDS', str(nfolds)).replace('VW', vw_filename)
+    AWK_TESTSET = "awk '(NR - $fold) % NFOLDS == 0' VW |".replace('NFOLDS', str(nfolds)).replace('VW', vw_filename)
 
-    system(arguments_check_command, log_level=-1)
-    if not os.path.exists(testmodel):
-        sys.exit('Failed during arguments check:\n%s\n' % arguments_check_command)
+    model_filename = get_temp_filename('model') + '.$fold'
 
-    for test_fold in xrange(len(folds)):
-        trainset = [fold for (index, fold) in enumerate(folds) if index != test_fold]
-        assert trainset and os.path.exists(trainset[0]), trainset
-        testset = folds[test_fold]
-        assert testset and os.path.exists(testset), testset
-
-        model_filename = get_temp_filename('model')
-        assert not os.path.exists(model_filename), 'internal error: temporary file already exists: %r' % model_filename
-        models.append(model_filename)
-
+    if with_predictions:
         p_filename = '%s.predictions' % model_filename
         with_p = '-p %s' % p_filename
-        p_filenames.append(p_filename)
+    else:
+        p_filename = None
+        with_p = ''
 
-        if r_fname:
-            r_filename = '%s.raw' % model_filename
-            with_r = '-r %s' % r_filename
-            r_filenames.append(r_filename)
+    if with_raw_predictions:
+        r_filename = '%s.raw' % model_filename
+        with_r = '-r %s' % r_filename
+    else:
+        r_filename = None
+        with_r = ''
+
+    if calc_num_features:
+        readable_model = model_filename + '.readable'
+    else:
+        readable_model = None
+
+    cleanup_tmpl = []
+
+    base_training_command = get_vw_command(
+        cleanup_tmpl,
+        AWK_TRAINSET,
+        model_filename,
+        vw_args,
+        feature_mask_retrain=feature_mask_retrain,
+        readable_model=readable_model,
+        name='train')
+
+    for item in base_training_command:
+        if capture_output is True or item['name'] in capture_output:
+            item['stderr'] = subprocess.PIPE
         else:
-            r_filename = None
-            with_r = ''
+            item['args'] += ' --quiet'
 
-        my_args = vw_args
+    testing_command = '%s %s -t -i %s %s %s' % (AWK_TESTSET, VW_CMD, model_filename, with_p, with_r)
+    testing_command = {'args': testing_command, 'name': 'test'}
 
-        if audit:
-            audit_filename = '%s.audit' % model_filename
-            audit = '-a > %s' % audit_filename
-            audit_filenames.append(audit_filename)
-        else:
-            audit_filename = ''
-            audit = ''
+    if capture_output is True or 'test' in capture_output:
+        testing_command['stderr'] = subprocess.PIPE
+    else:
+        testing_command['args'] += ' --quiet'
 
-        if calc_num_features:
-            readable_model = model_filename + '.readable'
-            readable_models.append(readable_model)
-        else:
-            readable_model = None
+    base_training_command.append(testing_command)
 
-        training_command = get_vw_train_command(to_cleanup, trainset, model_filename, my_args, feature_mask_retrain=feature_mask_retrain, readable_model=readable_model)
-        testing_command = '%s --quiet -d %s -t -i %s %s %s %s' % (VW_CMD, testset, model_filename, with_p, with_r, audit)
-        training_commands.append(training_command)
-        testing_commands.append(testing_command)
+    for item in base_training_command:
+        log("+ %s", item)
+
+    commands = []
+
+    for this_fold in xrange(1, nfolds + 1):
+        this_fold = str(this_fold)
+        training_command = deque([x.copy() for x in base_training_command])
+        for cmd in training_command:
+            cmd['args'] = cmd['args'].replace('$fold', this_fold)
+        commands.append(training_command)
+
+        for filename in [model_filename, p_filename, r_filename, readable_model] + cleanup_tmpl:
+            if not filename:
+                continue
+            filename = filename.replace('$fold', this_fold)
+            assert not os.path.exists(filename), filename
+            to_cleanup.append(filename)
+
+        if p_filename:
+            p_filenames.append(p_filename.replace('$fold', this_fold))
+
+        if r_filename:
+            r_filenames.append(r_filename.replace('$fold', this_fold))
+
+        if readable_model:
+            readable_models.append(readable_model.replace('$fold', this_fold))
 
     try:
-
-        success = run_subprocesses(training_commands, workers=workers, log_level=-1)
-
-        for name in models:
-            if not os.path.exists(name):
-                sys.exit('%s failed to write a model' % VW_CMD)
-
-        if success:
-            success = run_subprocesses(testing_commands, workers=workers, log_level=-1)
+        success, outputs = run_subprocesses(commands, workers=workers, log_level=-1)
 
         if not success:
-            sys.exit('%s failed' % VW_CMD)
+            vw_failed()
+
+        for name in to_cleanup:
+            if not os.path.exists(name):
+                vw_failed('missing %r' % (name, ))
 
         predictions = []
-        for fname in p_filenames:
-            predictions.extend(_load_first_float_from_each_string(fname))
+        for items in izip_longest(*[open(x) for x in p_filenames]):
+            predictions.extend([x for x in items if x is not None])
 
-        if p_fname and p_filenames:
-            system('cat %s > %s' % (' '.join(p_filenames), p_fname), log_level=-1)
-
-        if r_fname and r_filenames:
-            system('cat %s > %s' % (' '.join(r_filenames), r_fname), log_level=-1)
+        raw_predictions = []
+        for items in izip_longest(*[open(x) for x in r_filenames]):
+            raw_predictions.extend([x for x in items if x is not None])
 
         num_features = [get_num_features(name) for name in readable_models]
 
-        return np.array(predictions), num_features
+        outputs = dict((key, [parse_vw_output(out) for out in value]) for (key, value) in outputs.items())
+
+        return predictions, raw_predictions, num_features, outputs
 
     finally:
-        unlink(*p_filenames)
-        unlink(*r_filenames)
-        unlink(*audit_filenames)
         unlink(*to_cleanup)
-        unlink(*models)
-        unlink(*readable_models)
 
 
 def get_num_features(filename):
@@ -575,6 +672,19 @@ def get_num_features(filename):
             if line.strip() == ':0':
                 counting = True
     return count
+
+
+def parse_vw_output(output):
+    result = {}
+    for line in output.split('\n'):
+        if line.count(' = ') == 1:
+            key, value = line.split(' = ')
+            key = key.replace(' ', '_').replace("'", '').lower()
+            result[key] = value
+        else:
+            if re.search(VOWPAL_WABBIT_ERRORS, line.lower()):
+                sys.exit('vw failed: %s' % line.strip())
+    return result
 
 
 def _load_first_float_from_each_string(file, size=None):
@@ -603,11 +713,11 @@ def _load_first_float_from_each_string(file, size=None):
             mult = int(len(result) / size)
             if size * mult == len(result):
                 # if --passes N option was used, then the number of predictions will be N times higher
-                return result[-size:]
+                return np.array(result[-size:])
 
             sys.exit('Too many items in %r: found %r, expecting multiply of %r' % (filename, len(result), size))
 
-    return result
+    return np.array(result)
 
 
 class BaseParam(object):
@@ -893,13 +1003,11 @@ def get_tuning_config(config):
     return type(**params)
 
 
-def vw_optimize_over_cv(vw_source, folds, args, metric, config,
-                        predictions_filename=None, raw_predictions_filename=None, workers=None, other_metrics=[],
+def vw_optimize_over_cv(vw_filename, nfolds, args, metric, config,
+                        workers=None, other_metrics=[],
                         feature_mask_retrain=False, show_num_features=False):
     # we only depend on scipy if parameter tuning is enabled
     import scipy.optimize
-
-    # predictions_filename is unused currently
 
     gridsearch_params = []
     tunable_params = []
@@ -914,25 +1022,17 @@ def vw_optimize_over_cv(vw_source, folds, args, metric, config,
         else:
             base_args.append(param)
 
-    if predictions_filename:
-        predictions_filename_tmp = predictions_filename + '.tuning'
-    else:
-        predictions_filename_tmp = get_temp_filename('predictions')
-    if raw_predictions_filename:
-        raw_predictions_filename_tmp = raw_predictions_filename + '.tuning'
-    else:
-        raw_predictions_filename_tmp = None
-
     extra_args = ['']
     cache = {}
     best_result = [None, None]
 
-    if hasattr(vw_source, 'seek'):
-        vw_source.seek(0)
+    calculated_metrics = [x for x in [metric] + other_metrics if not x.startswith('vw')]
+    vw_metrics = [x for x in [metric] + other_metrics if x.startswith('vw')]
 
-    y_true = _load_first_float_from_each_string(vw_source)
-    assert y_true, vw_source
-    y_true = np.array(y_true)
+    if calculated_metrics:
+        y_true = _load_first_float_from_each_string(vw_filename)
+    else:
+        y_true = None
 
     def run(params):
         log('Parameters: %r', params)
@@ -952,15 +1052,17 @@ def vw_optimize_over_cv(vw_source, folds, args, metric, config,
         log('Trying %s %s...', VW_CMD, args)
 
         try:
-            # XXX use return value
-            cv_pred, num_features = vw_cross_validation(
-                folds,
+            y_pred_txt, raw_pred_txt, num_features, outputs = vw_cross_validation(
+                vw_filename,
+                nfolds,
                 args,
                 workers=workers,
-                p_fname=predictions_filename_tmp,
-                r_fname=raw_predictions_filename_tmp,
+                with_predictions=bool(calculated_metrics),
                 feature_mask_retrain=feature_mask_retrain,
-                calc_num_features=show_num_features)
+                calc_num_features=show_num_features,
+                capture_output=set([_get_stage(m) for m in vw_metrics]))
+        except KeyboardInterrupt:
+            raise
         except BaseException, ex:
             if type(ex) is not SystemExit:
                 traceback.print_exc()
@@ -968,26 +1070,39 @@ def vw_optimize_over_cv(vw_source, folds, args, metric, config,
             cache[args] = 0.0
             return 0.0
 
-        y_pred = _load_first_float_from_each_string(predictions_filename_tmp, len(y_true))
-        y_pred = np.array(y_pred)
-        result = calculate_score(metric, y_true, y_pred, config)
+        if y_true is not None:
+            if calculated_metrics and len(y_true) != len(y_pred_txt):
+                sys.exit('Internal error: expected %r predictions, got %r' % (len(y_true), len(y_pred_txt)))
+
+            if raw_pred_txt and len(y_true) != len(raw_pred_txt):
+                sys.exit('Internal error: expected %r raw predictions, got %r' % (len(y_true), len(raw_pred_txt)))
+
+        try:
+            y_pred = [float(x) for x in y_pred_txt]
+        except Exception:
+            for x in y_pred_txt:
+                try:
+                    float(x)
+                except Exception:
+                    sys.exit('Bad float: %r' % (x, ))
+            raise
+
+        result = calculate_or_extract_score(metric, y_true, y_pred, config, outputs, raise_on_error=True)
+
+        if not isinstance(result, (int, long, float)):
+            sys.exit('Bad metric for tuning: %s (value=%r)' % (metric, result))
 
         if not is_loss(metric):
             result = -result
 
-        is_best = ''
+        is_best = ' '
         if best_result[0] is None or result < best_result[0]:
-            is_best = '*' if best_result[0] is not None else ''
+            is_best = '*' if best_result[0] is not None else ' '
             best_result[0] = result
             best_result[1] = args
-            if predictions_filename:
-                os.rename(predictions_filename_tmp, predictions_filename)
-            if raw_predictions_filename:
-                os.rename(raw_predictions_filename_tmp, raw_predictions_filename)
 
-        unlink(predictions_filename_tmp, raw_predictions_filename_tmp)
-
-        other_results = ' '.join(['%s=%s' % (m, _frmt_score_short(calculate_score(m, y_true, y_pred, config))) for m in other_metrics])
+        other_scores = [(m, _frmt_score_short(calculate_or_extract_score(m, y_true, y_pred, config, outputs))) for m in other_metrics]
+        other_results = ' '.join(['%s=%s' % x for x in other_scores])
 
         if num_features:
             other_results += ' num_features=%s' % np.mean(num_features)
@@ -995,7 +1110,9 @@ def vw_optimize_over_cv(vw_source, folds, args, metric, config,
         if other_results:
             other_results = '  ' + other_results
 
-        log('Result %s %s... %s=%s%s%s', VW_CMD, args, metric, _frmt_score_short(result), is_best, other_results, log_level=1 + bool(is_best))
+        other_results = (is_best + other_results).rstrip()
+
+        log('Result %s %s... %s=%s%s', VW_CMD, args, metric, _frmt_score_short(result), other_results, log_level=1 + bool(is_best))
 
         cache[args] = result
         return result
@@ -1015,12 +1132,7 @@ def vw_optimize_over_cv(vw_source, folds, args, metric, config,
         already_done[params_as_str] = params
 
         extra_args[0] = params_as_str
-        try:
-            run([None] * len(tunable_params))
-        except Exception:
-            traceback.print_exc()
-            continue
-
+        run([None] * len(tunable_params))
         scipy.optimize.minimize(run, [x.packed_init() for x in tunable_params], method='Nelder-Mead', options={'xtol': 0.001, 'ftol': 0.001})
 
     return best_result
@@ -1215,98 +1327,38 @@ class Preprocessor(object):
         return [self.process_row(row) for row in rows]
 
 
-def read_labels(filename, source, format, n_classes, label_index, ignoreheader):
-    labels_counts = {}
-    examples_count = 0
-
+def read_y_true(filename, format, columnspec, ignoreheader, named_labels):
     log('Reading labels from %s', filename or 'stdin')
-    rows_source = open_anything(filename or source, format, ignoreheader=ignoreheader)
+    rows_source = open_anything(filename, format, ignoreheader=ignoreheader)
 
-    all_integers = True
-    all_floats = True
+    if format == 'vw':
+        label_index = 0
+    else:
+        label_index = columnspec.index('y')
+
     y_true = []
 
     for row in rows_source:
         label = row[label_index]
+        if named_labels is not None and label not in named_labels:
+            sys.exit('Unexpected label in %s: %r (allowed: %s)' % (filename, label, named_labels))
         y_true.append(label)
-        n = labels_counts[label] = labels_counts.get(label, 0) + 1
-        examples_count += 1
-        if n == 1:
-            if all_integers is True:
-                try:
-                    int(label)
-                except Exception:
-                    all_integers = False
-            if all_floats is True:
-                try:
-                    float(label)
-                except Exception:
-                    all_floats = False
 
-    if hasattr(source, 'seek'):
-        source.seek(0)
-
-    log('Counted %r examples', examples_count)
-
-    if not labels_counts:
-        sys.exit('empty: %s' % filename)
-
-    labels = labels_counts.keys()
-
-    def format_classes():
-        classes = [(-count, name) for (name, count) in labels_counts.items()]
-        classes.sort()
-        classes = ['%s: %.2f%%' % (name, -100.0 * count / examples_count) for (count, name) in classes]
-        if len(classes) > 6:
-            del classes[3:-3]
-            classes[3:3] = ['...']
-        return ', '.join(classes)
-
-    if all_integers:
-        labels = [int(x) for x in labels]
-        labels.sort()
-        max_label = labels[-1]
-        if n_classes:
-            if n_classes != len(labels):
-                log('Expected %r classes, but found %r', n_classes, len(labels))
-        if n_classes == 0:
-            n_classes = max_label
-        log('Found %r integer classes: %s', len(labels), format_classes(), log_level=1)
-
-        # no mapping in this case
-        labels = None
-        y_true = np.array([int(x) for x in y_true])
-
-    elif all_floats:
-        labels = [float(x) for x in labels]
-        log('Found float responses: %s..%s', min(labels), max(labels), log_level=1)
-        if n_classes is not None:
-            sys.exit('Float responses, not compatible with multiclass')
-        labels = None
+    if not named_labels:
         y_true = np.array([float(x) for x in y_true])
 
-    else:
-        log('Found %r textual labels: %s', len(labels), format_classes(), log_level=1)
-
-        if n_classes is None and len(labels) != 2:
-            sys.exit('Found textual labels, expecting multiclass option. Pass 0 to auto-set number of classes to %r, e.g. "--oaa 0"' % len(labels))
-
-        n_classes = len(labels)
-
-        labels.sort()
-
-    return labels_counts, y_true, labels, n_classes
+    return y_true
 
 
 def _make_proper_list(s, type=None):
-    if not s:
-        return s
-
     if isinstance(s, basestring):
         result = s.split(',')
         if type is not None:
             result = [type(x) for x in result]
         return result
+
+    if not s:
+        return s
 
     result = []
     if isinstance(s, list):
@@ -1317,22 +1369,27 @@ def _make_proper_list(s, type=None):
     return result
 
 
-def parse_weight(config, labels=None):
+def proper_label(s):
+    if '|' in s or ' ' in s or ':' in s:
+        sys.exit('Not a proper label: %r' % s)
+    return s
+
+
+def parse_weight(config, named_labels=None):
     """
     >>> parse_weight('A:B:2', ['A:B', 'another_label'])
     {'A:B': 2.0}
 
     >>> parse_weight('A:B:2')
-    {'A:B': 2.0}
+    Traceback (most recent call last):
+     ...
+    SystemExit: Weight must be specified as CLASS(float):WEIGHT, 'A:B' not recognized
     """
     if not config:
         return None
 
-    if config == ['balanced']:
-        return config
-
-    if labels and not isinstance(labels, list):
-        raise TypeError('must be list, not %r' % type(labels))
+    if named_labels is not None and not isinstance(named_labels, list):
+        raise TypeError('must be list, not %r' % type(named_labels))
 
     config = _make_proper_list(config)
 
@@ -1346,8 +1403,14 @@ def parse_weight(config, labels=None):
             sys.exit('Weight must be specified as CLASS:WEIGHT, cannot parse %r' % item)
         label, weight = item.rsplit(':', 1)
 
-        if labels is not None and label not in labels:
-            sys.exit('Label %r is not recognized. Expected: %r' % (label, labels))
+        if named_labels is None:
+            try:
+                label = float(label)
+            except Exception:
+                sys.exit('Weight must be specified as CLASS(float):WEIGHT, %r not recognized' % (label, ))
+        else:
+            if label not in named_labels:
+                sys.exit('Label %r is not recognized. Expected: %r' % (label, named_labels))
 
         try:
             weight = float(weight)
@@ -1372,7 +1435,6 @@ def get_sample_weight(y_true, config):
     updated = np.zeros(N)
 
     for klass, weight in config.items():
-        assert isinstance(klass, (int, long, float)), [klass]
         result += np.multiply(np.ones(N) * weight, y_true == klass)
         updated += y_true == klass
 
@@ -1381,31 +1443,18 @@ def get_sample_weight(y_true, config):
     return result
 
 
-def get_balanced_weights(labels_counts):
-    min_count = float(min(labels_counts.values()))
-
-    result = {}
-    for label in labels_counts:
-        result[label] = min_count / labels_counts[label]
-
-    log('Calculated balanced weights: %s', ' '.join('%s: %g' % (k, w) for (k, w) in sorted(result.items())), log_level=1)
-
-    return result
-
-
-def convert_row_to_vw(row, columnspec, preprocessor=None, labels=None, weights=None):
+def convert_row_to_vw(row, columnspec, preprocessor=None, weights=None, named_labels=None):
     assert isinstance(columnspec, list), columnspec
 
-    # labels maps user labels into VW label. Can be None.
-    assert labels is None or isinstance(labels, dict), labels
-
-    # weights maps user label into weight. Can be None.
-    assert labels is None or isinstance(weights, dict), weights
+    if columnspec[-1] == '*':
+        del columnspec[-1]
+        while len(columnspec) < len(row):
+            columnspec.append(columnspec[-1])
 
     if len(row) != len(columnspec):
         sys.exit('Expected %r columns (%r), got %r (%r)' % (len(columnspec), columnspec, len(row), row))
 
-    y = None
+    y = ''
     x = []
     info = []
     for item, spec in zip(row, columnspec):
@@ -1425,18 +1474,18 @@ def convert_row_to_vw(row, columnspec, preprocessor=None, labels=None, weights=N
     else:
         info = ''
 
-    if labels:
-        vw_y = labels.get(y)
-        if vw_y is None:
-            sys.exit('Unexpected label: %s', limited_repr(y), log_level=2)
-    else:
-        if y is None:
-            vw_y = ''
+    if named_labels is None:
+        if y:
+            weight_key = float(y)
         else:
-            vw_y = y
+            weight_key = y
+    else:
+        weight_key = y
+        if y not in named_labels:
+            sys.exit('Label not recognized: %r (allowed: %r)' % (y, named_labels))
 
     if weights is not None:
-        weight = weights.get(y, 1)
+        weight = weights.get(weight_key, 1)
         if weight == 1:
             weight = ''
         else:
@@ -1449,32 +1498,32 @@ def convert_row_to_vw(row, columnspec, preprocessor=None, labels=None, weights=N
         text = '  '.join(x)
     else:
         text = ' '.join(x)
+        text = re.sub('\s+', ' ', text)
     text = text.replace(':', ' ').replace('|', ' ')
     text = text.strip()
-    text = '%s %s%s| %s\n' % (vw_y, weight, info, text)
+    text = '%s %s%s| %s\n' % (y, weight, info, text)
     return text
 
 
-def _convert_any_to_vw(source, format, output, labels, weights, preprocessor, columnspec, ignoreheader):
+def _convert_any_to_vw(source, format, output, weights, preprocessor, columnspec, named_labels, ignoreheader):
     assert format != 'vw'
     assert isinstance(columnspec, list)
 
-    if labels:
-        labels = dict((label, 1 + labels.index(label)) for label in labels)
+    if named_labels is not None:
+        assert not isinstance(named_labels, basestring)
+        named_labels = set(named_labels)
 
     rows_source = open_anything(source, format, ignoreheader=ignoreheader)
     output = open(output, 'wb')
 
     for row in rows_source:
-        vw_line = convert_row_to_vw(row, columnspec, preprocessor=preprocessor, labels=labels, weights=weights)
+        vw_line = convert_row_to_vw(row, columnspec, preprocessor=preprocessor, weights=weights, named_labels=named_labels)
         output.write(vw_line)
 
-    output.flush()
-    os.fsync(output.fileno())
-    output.close()
+    flush_and_close(output)
 
 
-def convert_any_to_vw(source, format, output_filename, columnspec, labels, weights, preprocessor, ignoreheader, workers):
+def convert_any_to_vw(source, format, output_filename, columnspec, named_labels, weights, preprocessor, ignoreheader, workers):
     assert format != 'vw'
     preprocessor = preprocessor or ''
 
@@ -1482,20 +1531,23 @@ def convert_any_to_vw(source, format, output_filename, columnspec, labels, weigh
 
     start = time.time()
 
+    if source is None:
+        from cStringIO import StringIO
+        source = StringIO(sys.stdin.read())
+
     workers = _workers(workers)
-    batches, total_lines = split_file(source, nfolds=workers, ignoreheader=ignoreheader, log_level=-1, minfolds=None)
+    # XXX do os.stat on the source and decide on number of workers based on file size (e.g. less than 50k per worker does not make much sense)
+    batches, total_lines = split_file(source, nfolds=workers, ignoreheader=ignoreheader, log_level=-1)
 
     batches_out = [x + '.out' for x in batches]
-
-    labels = ','.join(labels or [])
 
     try:
         commands = []
 
         common_cmd = [quote(sys.executable), quote(__file__), '--format', format]
 
-        if labels:
-            common_cmd += ['--labels', quote(labels)]
+        if named_labels:
+            common_cmd += ['--named_labels', ','.join(named_labels)]
 
         if weights:
             weights = ['%s:%s' % (x, weights[x]) for x in weights if weights[x] != 1]
@@ -1509,9 +1561,10 @@ def convert_any_to_vw(source, format, output_filename, columnspec, labels, weigh
 
         for batch in batches:
             cmd = common_cmd + ['--tovw_simple', batch + '.out', '-d', batch]
-            commands.append(' '.join(cmd))
+            commands.append({'args': ' '.join(cmd)})
 
-        if not run_subprocesses(commands, workers=workers, log_level=-1):
+        success, outputs = run_subprocesses(commands, workers=workers, log_level=-1)
+        if not success:
             sys.exit(1)
 
         cmd = 'cat ' + ' '.join(batches_out)
@@ -1568,23 +1621,61 @@ def is_loss(metric_name):
     if metric_name.endswith('_w'):
         metric_name = metric_name[:-2]
     metric_name = metrics_shortcuts.get(metric_name, metric_name)
-    if metric_name.endswith('_loss') or metric_name.endswith('_error'):
+    if 'loss' in metric_name or metric_name.endswith('_error'):
         return True
+
+
+def calculate_or_extract_score(metric, y_true, y_pred, config, outputs, raise_on_error=False):
+    try:
+        if metric.startswith('vw'):
+            return extract_score(metric, outputs)
+        return calculate_score(metric, y_true, y_pred, config)
+    except Exception, ex:
+        if raise_on_error:
+            raise
+        return '%s: %s' % (type(ex).__name__, ex)
+
+
+def _parse_vw_metric(metric):
+    if metric.startswith('vw_train'):
+        _prefix, stage, metric_name = metric.split('_', 2)
+    else:
+        _prefix, metric_name = metric.split('_', 1)
+        stage = 'test'
+    return stage, metric_name
+
+
+def _get_stage(metric):
+    return _parse_vw_metric(metric)[0]
+
+
+def extract_score(metric, outputs):
+    stage, metric = _parse_vw_metric(metric)
+    outputs = outputs.get(stage)
+
+    if not outputs:
+        raise ValueError('error: No output for stage %r' % stage)
+
+    values = [x.get(metric) for x in outputs]
+
+    for item in values:
+        if item is None:
+            raise ValueError('Metric (%s)%s not found. Available metrics: %s' % (stage, metric, outputs[0].keys()))
+
+    try:
+        values = [float(x) for x in values]
+    except Exception:
+        return None
+
+    return np.mean(values)
 
 
 def calculate_score(metric, y_true, y_pred, config):
     sample_weight = get_sample_weight(y_true, config.get('weight_metric'))
 
-    n_classes = config.get('n_classes')
     threshold = config.get('threshold')
     min_label = config.get('min_label')
     max_label = config.get('max_label')
-
-    if n_classes is None and threshold is None:
-        sys.exit('Bad config: missing n_classes and threshold:\n%s' % pprint.pformat(config))
-
-    if n_classes is not None and threshold is not None:
-        sys.exit('Bad config: both n_classes and threshold are present, expected only one:\n%s' % pprint.pformat(config))
 
     extra_args = {'sample_weight': sample_weight}
     if metric.endswith('_w'):
@@ -1598,14 +1689,16 @@ def calculate_score(metric, y_true, y_pred, config):
     if fullname in globals():
         func = globals()[fullname]
     else:
-        func = getattr(sklearn.metrics, fullname)
+        func = getattr(sklearn.metrics, fullname, None)
+        if func is None:
+            sys.exit('Cannot find %r in sklearn.metrics' % (fullname, ))
 
     metric_type = metrics_param.get(fullname)
 
     if metric_type == 'y_prob':
         # brier_score_loss
-        assert threshold is not None, 'Cannot apply %s/%s on multiclass' % (metric, fullname)
-        assert min_label is not None and max_label is not None, config
+        if min_label is None or max_label is None:
+            raise ValueError('Cannot calculate on multiclass')
         delta = float(max_label - min_label)
         assert delta
         y_true = (y_true - min_label) / delta
@@ -1615,27 +1708,24 @@ def calculate_score(metric, y_true, y_pred, config):
         return func(y_true, y_pred, **extra_args)
     elif metric_type == 'y_score':
         # auc, mse
-        assert threshold is not None, 'Cannot apply %s/%s on multiclass' % (metric, fullname)
         return func(y_true, y_pred, **extra_args)
     elif metric_type == 'y_pred':
         if threshold is not None:
-            y_true_norm = y_true > threshold
-            y_pred_norm = y_pred > threshold
-            return func(y_true_norm, y_pred_norm, **extra_args)
-        else:
-            return func(y_true, y_pred, **extra_args)
+            y_true = y_true > threshold
+            y_pred = y_pred > threshold
+        return func(y_true, y_pred, **extra_args)
     else:
-        sys.exit('Unknown metric: %r' % metric)
+        raise ValueError('Unknown metric: %r' % metric)
 
 
-def main_tune(metric, config, source, format, args, preprocessor_base, nfolds, ignoreheader, workers, feature_mask_retrain, show_num_features):
+def main_tune(metric, config, filename, format, args, preprocessor_base, nfolds, ignoreheader, workers, feature_mask_retrain, show_num_features):
     if preprocessor_base is None:
         preprocessor_base = []
     else:
         preprocessor_base = preprocessor_base.to_options()
 
     if not metric:
-        sys.exit('Provide metric to optimize for with --metric auc|acc|mse|f1')
+        sys.exit('Provide metric to optimize for with "--metric METRIC"')
 
     optimization_metric = metric[0]
     other_metrics = metric[1:]
@@ -1664,41 +1754,37 @@ def main_tune(metric, config, source, format, args, preprocessor_base, nfolds, i
         already_done[str(preprocessor)] = preprocessor_opts
 
         if format == 'vw':
-            vw_filename = source
+            assert isinstance(filename, basestring), filename
+            vw_filename = filename
+
             # XXX preprocessor can make sense too
             assert not preprocessor, 'TODO'
         else:
             vw_filename = get_temp_filename('vw_filename')
+            to_cleanup.append(vw_filename)
             convert_any_to_vw(
-                source=source,
+                source=filename,
                 format=format,
                 output_filename=vw_filename,
                 columnspec=config.get('columnspec'),
-                labels=config.get('labels'),
+                named_labels=config.get('named_labels'),
                 weights=config.get('weights'),
                 preprocessor=preprocessor_opts,
                 ignoreheader=ignoreheader,
                 workers=workers)
 
-        folds, total = split_file(vw_filename, nfolds)
-        for fname in folds:
-            assert os.path.exists(fname), fname
-
         vw_args = [x for x in my_args if x not in Preprocessor.ALL_OPTIONS_DASHDASH]
 
-        try:
-            this_best_result, this_best_options = vw_optimize_over_cv(
-                vw_filename,
-                folds,
-                vw_args,
-                optimization_metric,
-                config,
-                workers=workers,
-                other_metrics=other_metrics,
-                feature_mask_retrain=feature_mask_retrain,
-                show_num_features=show_num_features)
-        finally:
-            unlink(*folds)
+        this_best_result, this_best_options = vw_optimize_over_cv(
+            vw_filename,
+            nfolds,
+            vw_args,
+            optimization_metric,
+            config,
+            workers=workers,
+            other_metrics=other_metrics,
+            feature_mask_retrain=feature_mask_retrain,
+            show_num_features=show_num_features)
 
         is_best = ''
         if this_best_result is not None and (best_result is None or this_best_result < best_result):
@@ -1708,14 +1794,14 @@ def main_tune(metric, config, source, format, args, preprocessor_base, nfolds, i
             is_best = '*'
 
         if preprocessor_opts:
-            print 'Best options with %s: %s' % (preprocessor_opts or 'no preprocessing', this_best_options, )
-        print 'Best %s with %r: %s%s' % (optimization_metric, preprocessor_opts or 'no preprocessing', _frmt_score_short(this_best_result), is_best)
+            log_always('Best options with %s = %s', preprocessor_opts or 'no preprocessing', this_best_options)
+        log_always('Best %s with %r = %s%s', optimization_metric, preprocessor_opts or 'no preprocessing', _frmt_score_short(this_best_result), is_best)
         # print 'Improvement over no l1=%.4f. Improvement over initial guess=%.4f' % (no_l1_result - best_result[0], initial_l1_result - best_result[0])
 
     # XXX don't show this if preprocessor is not enabled and not tuned
-    print 'Best preprocessor options: %s' % (best_preprocessor_opts or '<none>', )
-    print 'Best vw options: %s' % (best_vw_options, )
-    print 'Best %s: %s' % (optimization_metric, _frmt_score_short(best_result))
+    log_always('Best preprocessor options = %s', best_preprocessor_opts or '<none>')
+    log_always('Best vw options = %s', best_vw_options)
+    log_always('Best %s = %s', optimization_metric, _frmt_score_short(best_result))
     # print 'Improvement over no l1=%.4f. Improvement over initial guess=%.4f' % (no_l1_result - best_result[0], initial_l1_result - best_result[0])
     preprocessor = Preprocessor.from_options(best_preprocessor_opts)
     return best_vw_options, preprocessor
@@ -1774,44 +1860,6 @@ def parseaudit(source):
             print item
 
 
-def main_streaming(source, format, columnspec, vw_args, vw_options, preprocessor, labels, weights, ignoreheader):
-    vw_cmd = '%s %s' % (VW_CMD, vw_args)
-
-    if vw_options.initial_regressor:
-        assert ' -i ' not in vw_cmd, vw_cmd
-        vw_cmd += ' -i %s' % vw_options.initial_regressor
-
-    if vw_options.final_regressor:
-        vw_cmd += ' -f %s' % vw_options.final_regressor
-
-    if vw_options.predictions:
-        vw_cmd += ' -p %s' % vw_options.predictions
-
-    if vw_options.raw_predictions:
-        vw_cmd += ' -r %s' % vw_options.raw_predictions
-
-    if vw_options.audit:
-        vw_cmd += ' -a'
-
-    vw_cmd = vw_cmd.split()
-
-    if format == 'vw':
-        if source is None:
-            popen = Popen(vw_cmd, stdin=sys.stdin)
-        else:
-            vw_cmd.extend(['-d', source])
-            popen = Popen(vw_cmd)
-    else:
-        popen = Popen(vw_cmd, stdin=subprocess.PIPE)
-        for row in open_anything(source, format, ignoreheader=ignoreheader, force_unbuffered=True):
-            line = convert_row_to_vw(row, columnspec=columnspec, preprocessor=preprocessor, labels=labels, weights=weights)
-            popen.stdin.write(line)
-            # subprocess.Popen is unbuffered by default
-        popen.stdin.close()
-
-    popen.wait()
-
-
 def _frmt_score(x):
     if isinstance(x, float):
         if x < 0:
@@ -1821,11 +1869,43 @@ def _frmt_score(x):
 
 
 def _frmt_score_short(x):
+    if isinstance(x, basestring):
+        return x.strip().split()[0].strip(':')
     if isinstance(x, float):
         if x < 0:
             x = -x
         return '%.4f' % x
     return str(x)
+
+
+def read_argument(args, name):
+    assert isinstance(args, list), args
+    for item in args:
+        if name is None:
+            return item
+        if item == name:
+            name = None
+
+
+def remove_option(args, name, argument):
+    """
+    >>> remove_option(["--cache_file", "hello"], "--cache_file", 1)
+    []
+
+    >>> remove_option(["-b", "25", "--cache_file", "hello", "-k"], "--cache_file", 1)
+    ['-b', '25', '-k']
+
+    >>> remove_option(["-b", "25", "--cache_file", "hello", "-k"], "--cache_file", 0)
+    ['-b', '25', 'hello', '-k']
+    """
+    assert isinstance(args, list), args
+    index = 0
+    while index < len(args):
+        if name == args[index]:
+            del args[index:index + 1 + int(argument)]
+        else:
+            index += 1
+    return args
 
 
 def main(to_cleanup):
@@ -1834,7 +1914,7 @@ def main(to_cleanup):
     # cross-validation and parameter tuning options
     parser.add_option('--cv', action='store_true')
     parser.add_option('--workers', type=int)
-    parser.add_option('--nfolds', type=int)
+    parser.add_option('--nfolds', type=int, default=10)
     parser.add_option('--metric', action='append')
 
     # class weight option
@@ -1850,11 +1930,11 @@ def main(to_cleanup):
     parser.add_option('-i', '--initial_regressor')
     parser.add_option('-d', '--data')
     parser.add_option('-a', '--audit', action='store_true')
+
     parser.add_option('--readconfig')
     parser.add_option('--writeconfig')
 
     # preprocessing options:
-    parser.add_option('--labels')
     for opt in Preprocessor.ALL_OPTIONS:
         parser.add_option('--%s' % opt, action='store_true')
     parser.add_option('--columnspec')
@@ -1878,16 +1958,22 @@ def main(to_cleanup):
     parser.add_option('--keeptmp', action='store_true')
     parser.add_option('--savefeatures')
     parser.add_option('--parseaudit', action='store_true')
+    parser.add_option('--linemode', action='store_true')
 
     # extra
     parser.add_option('--vw')
     parser.add_option('--feature_mask_retrain', action='store_true')
     parser.add_option('--feature_mask_retrain_args')
 
+    parser.add_option('--tmpstart')
+
     options, args = parser.parse_args()
 
-    globals()['LOG_LEVEL'] += options.lesslogs - options.morelogs
+    globals()['LOG_LEVEL'] += options.lesslogs - options.morelogs + (args.count('--quiet'))
     globals()['KEEPTMP'] = options.keeptmp
+
+    if options.tmpstart:
+        globals()['TMP_START'] = options.tmpstart
 
     if options.parseaudit:
         parseaudit(sys.stdin)
@@ -1918,27 +2004,23 @@ def main(to_cleanup):
         filename = None
     else:
         filename = options.data
+        if not os.path.exists(filename):
+            sys.exit('File not found: %s' % filename)
 
-    labels = _make_proper_list(options.labels)
+    named_labels = read_argument(args, '--named_labels')
+    named_labels = _make_proper_list(named_labels, proper_label)
+    if named_labels is not None:
+        config['named_labels'] = named_labels
 
-    if labels and len(labels) <= 1:
-        sys.exit('Expected comma-separated list of labels: --labels %r\n' % options.labels)
-
-    if labels:
-        config['labels'] = labels
-
-    weight = parse_weight(options.weight, labels)
-    weight_train = parse_weight(options.weight_train, labels) or weight
-    weight_metric = parse_weight(options.weight_metric, labels) or weight
+    weight = parse_weight(options.weight, config.get('named_labels'))
+    weight_train = parse_weight(options.weight_train, config.get('named_labels')) or weight
+    weight_metric = parse_weight(options.weight_metric, config.get('named_labels')) or weight
 
     if weight_train:
         config['weight_train'] = weight_train
 
     if weight_metric:
         config['weight_metric'] = weight_metric
-
-    if options.columnspec:
-        config['columnspec'] = _make_proper_list(options.columnspec)
 
     preprocessor_from_options = Preprocessor.from_options(options.__dict__)
 
@@ -1965,30 +2047,28 @@ def main(to_cleanup):
     if not format:
         format = 'vw'
 
+    if options.columnspec:
+        config['columnspec'] = _make_proper_list(options.columnspec)
+    elif 'columnspec' not in config:
+        config['columnspec'] = _make_proper_list(DEFAULT_COLUMNSPEC)
+
     config['format'] = format
 
     if options.tovw_simple:
         assert not options.workers or options.workers == 1, options.workers
-        assert 'balaced' not in str(options.weight_train), '"balanced" not supported here: %r' % options.weight_train
         _convert_any_to_vw(
             filename,
             format,
             options.tovw_simple,
-            labels,
             weight_train,
             preprocessor,
             config.get('columnspec'),
+            config.get('named_labels'),
             ignoreheader=options.ignoreheader)
         sys.exit(0)
 
     if options.threshold is not None:
         config['threshold'] = options.threshold
-
-    vw_multiclass_opts = 'oaa|ect|csoaa|log_multi|recall_tree'
-
-    n_classes_cmdline = re.findall('--(?:%s)\s+(\d+)' % vw_multiclass_opts, ' '.join(args))
-    if n_classes_cmdline:
-        config['n_classes'] = max(int(x) for x in n_classes_cmdline)
 
     need_tuning = 0
 
@@ -1997,99 +2077,59 @@ def main(to_cleanup):
             need_tuning = 1
             break
 
-    options.metric = _make_proper_list(options.metric) or []
+    options.metric = _make_proper_list(options.metric) or ['vw_average_loss']
     show_num_features = 'num_features' in options.metric
     options.metric = [x for x in options.metric if 'num_features' != x]
 
-    can_do_streaming = True
-    if (config.get('n_classes') == 0 or
-            options.metric or
-            options.cv or
-            options.toperrors or
-            need_tuning or
-            options.savefeatures or
-            options.tovw or
-            options.tovw_simple or
-            options.feature_mask_retrain):
-        can_do_streaming = False
+    # there are metrics that we calculate from y_true and y_pred, these are listed below. Using these requires extra
+    # pass over input to read y_true
+    calculated_metrics = [x for x in options.metric if not x.startswith('vw')]
 
-    if can_do_streaming:
-        main_streaming(
-            source=filename,
-            format=format,
-            columnspec=config.get('columnspec'),
-            vw_args=' '.join(args),
-            vw_options=options,
-            preprocessor=preprocessor,
-            labels=labels,
-            weights=config.get('weights'),
-            ignoreheader=options.ignoreheader)
-        sys.exit(0)
+    # these are the metrics we extract from vw output (for "average loss" use "vw_average_loss")
+    vw_metrics = [x for x in options.metric if x.startswith('vw')]
 
-    labels_counts = None
     y_true = None
 
-    need_to_read_labels = options.metric or 'labels' not in config or options.toperrors
-    #  ^ This is not correct condition. we only need labels for weight_metric
-    #  ^ This also won't be right for "vw_average_loss" label, which is parsed from VW output, not calculated
-
-    if filename is None:
-        filename = None
-        from StringIO import StringIO
-        source = StringIO(sys.stdin.read())
-    else:
-        source = None
-
-    if need_to_read_labels:
-        if format == 'vw':
-            label_index = 0
-        else:
-            if 'columnspec' not in config:
-                config['columnspec'] = ['y', 'text']
-            try:
-                label_index = config['columnspec'].index('y')
-            except ValueError:
-                label_index = None
-        if label_index is not None:
-            labels_counts, y_true, config['labels'], config['n_classes'] = read_labels(filename, source, format, config.get('n_classes'), label_index, options.ignoreheader)
-            if config['n_classes'] is None:
-                config['min_label'] = min(y_true)
-                config['max_label'] = max(y_true)
-                config['threshold'] = (config['min_label'] + config['max_label']) / 2.0
-                log('Setting threshold from data = %g', config['threshold'])
-
-    if config.get('n_classes'):
-        args = re.sub('(--(?:%s)\s+)(0)' % vw_multiclass_opts, '\\g<1>' + str(config['n_classes']), ' '.join(args)).split()
-
-    if config.get('weight_train') == ['balanced']:
-        config['weight_train'] = balanced_weights = get_balanced_weights(labels_counts)
-
-    if config.get('weight_metric') == ['balanced']:
-        config['weight_metric'] = balanced_weights or get_balanced_weights(labels_counts)
-
-    if config.get('weight_metric'):
-        if config.get('labels'):
-            config['weight_metric'] = dict((config['labels'].index(key) + 1, weight) for (key, weight) in config['weight_metric'].items())
-        else:
-            config['weight_metric'] = dict((float(key), weight) for (key, weight) in config['weight_metric'].items())
+    if calculated_metrics or options.cv or need_tuning or options.savefeatures or options.feature_mask_retrain is not None:
+        # cannot work with stdin, write it to a temp file
+        if filename is None:
+            filename = get_temp_filename(format)
+            to_cleanup.append(filename)
+            fobj = open(filename, 'wb')
+            for line in sys.stdin:
+                fobj.write(line)
+            flush_and_close(fobj)
 
     if options.tovw:
-        assert format != 'vw', 'Input should be csv or tsv'  # XXX
+        assert format != 'vw', 'Input should be csv or tsv'
         convert_any_to_vw(
-            source=source or filename,
+            filename,
             format=format,
             output_filename=options.tovw,
             preprocessor=config.get('preprocessor'),
             columnspec=config.get('columnspec'),
-            labels=config.get('labels'),
+            named_labels=config.get('named_labels'),
             weights=config.get('weight_train'),
             ignoreheader=options.ignoreheader,
             workers=options.workers)
         sys.exit(0)
 
+    is_multiclass = any([read_argument(args, '--' + x) for x in 'oaa ect csoaa log_multi recall_tree'.split()])
+
+    if calculated_metrics:
+        y_true = read_y_true(filename, format, config.get('columnspec'), options.ignoreheader, config.get('named_labels'))
+        if not len(y_true):
+            sys.exit('%s is empty' % filename)
+        if not config.get('named_labels') and not is_multiclass:
+            min_label = np.min(y_true)
+            max_label = np.max(y_true)
+            config.setdefault('min_label', min_label)
+            config.setdefault('max_label', max_label)
+            config.setdefault('threshold', (min_label + max_label) / 2.0)
+
     if options.report:
-        if not options.metric:
-            options.metric = ['mse']
+        assert options.metric
+        assert calculated_metrics
         if options.predictions in STDIN_NAMES:
             if used_stdin:
                 sys.exit('Can only use stdin in one argument')
@@ -2100,14 +2140,12 @@ def main(to_cleanup):
             sys.exit('Must provide -p')
 
         assert y_true is not None
-        y_pred = np.array(_load_first_float_from_each_string(predictions, len(y_true)))
+        y_pred = _load_first_float_from_each_string(predictions, len(y_true))
 
         for metric in options.metric:
-            print '%s: %s' % (metric, _frmt_score(calculate_score(metric, y_true, y_pred, config)))
+            log_always('%s = %s', metric, _frmt_score(calculate_score(metric, y_true, y_pred, config)))
 
         sys.exit(0)
-
-    need_tuning = 0
 
     index = 0
     while index < len(args):
@@ -2115,20 +2153,20 @@ def main(to_cleanup):
         if arg.startswith('-'):
             next_arg = args[index + 1] if index + 1 < len(args) else ''
             if arg.endswith('?'):
-                need_tuning += 1
                 args[index] = get_tuning_config(arg)
             elif next_arg.endswith('?'):
-                need_tuning += 1
                 args[index:index + 2] = [get_tuning_config(arg + ' ' + next_arg)]
         index += 1
+
+    metric = options.metric or ['vw_average_loss']
 
     if need_tuning:
         # QQQ --initial_regressor is not passed there
         assert not options.audit, '-a incompatible with parameter tuning'
         config['vw_train_options'], preprocessor = main_tune(
-            metric=options.metric,
+            metric=metric,
             config=config,
-            source=source or filename,
+            filename=filename,
             format=format,
             args=args,
             preprocessor_base=preprocessor,
@@ -2137,71 +2175,70 @@ def main(to_cleanup):
             workers=options.workers,
             feature_mask_retrain=options.feature_mask_retrain,
             show_num_features=show_num_features)
-        assert config['vw_train_options'], config
+        if config['vw_train_options'] is None:
+            sys.exit('tuning failed')
         config['preprocessor'] = str(preprocessor)
+        vw_args = config['vw_train_options']
     else:
-        config['vw_train_options'] = ' '.join(args)
+        vw_args = ' '.join(args)
 
-    if format == 'vw':
-        assert not preprocessor or not preprocessor.to_options(), preprocessor
-        vw_source = source or filename
-    else:
-        vw_filename = get_temp_filename('vw')
-        to_cleanup.append(vw_filename)
+    vw_filename = None
 
-        convert_any_to_vw(
-            source=source or filename,
-            format=format,
-            output_filename=vw_filename,
-            preprocessor=config.get('preprocessor'),
-            columnspec=config.get('columnspec'),
-            labels=config.get('labels'),
-            weights=config.get('weight_train'),
-            ignoreheader=options.ignoreheader,
-            workers=options.workers)
+    if filename:
+        if format == 'vw':
+            assert not preprocessor or not preprocessor.to_options(), preprocessor
+            vw_filename = filename
+        else:
+            vw_filename = get_temp_filename('vw')
+            to_cleanup.append(vw_filename)
 
-        vw_source = vw_filename
+            convert_any_to_vw(
+                source=filename,
+                format=format,
+                output_filename=vw_filename,
+                preprocessor=config.get('preprocessor'),
+                columnspec=config.get('columnspec'),
+                named_labels=config.get('named_labels'),
+                weights=config.get('weight_train'),
+                ignoreheader=options.ignoreheader,
+                workers=options.workers)
 
     if options.cv:
         # QQQ --initial_regressor is not passed there
         # XXX we could skip --cv here if we make main_tune() keep final predictions and raw_predictions for us
-        folds = []
-        try:
-            folds, total_lines = split_file(vw_source, nfolds=options.nfolds)
 
-            assert len(folds) >= 2, folds
+        assert vw_filename
 
-            cv_predictions = options.predictions
-            if not cv_predictions:
-                cv_predictions = get_temp_filename('cvpred')
-                to_cleanup.append(cv_predictions)
+        cv_pred_txt, raw_cv_pred_txt, num_features, outputs = vw_cross_validation(
+            vw_filename,
+            options.nfolds,
+            vw_args,
+            workers=options.workers,
+            with_predictions=bool(calculated_metrics) or options.predictions,
+            with_raw_predictions=bool(options.raw_predictions),
+            feature_mask_retrain=options.feature_mask_retrain,
+            calc_num_features=show_num_features,
+            capture_output=set([_get_stage(m) for m in vw_metrics]))
 
-            cv_pred, num_features = vw_cross_validation(
-                folds,
-                config['vw_train_options'],
-                workers=options.workers,
-                p_fname=cv_predictions,
-                r_fname=options.raw_predictions,
-                audit=options.audit,
-                feature_mask_retrain=options.feature_mask_retrain,
-                calc_num_features=show_num_features)
+        cv_pred = [float(x) for x in cv_pred_txt]
 
-            assert y_true is not None
+        for metric in options.metric:
+            value = calculate_or_extract_score(metric, y_true, cv_pred, config, outputs)
+            if value is not None:
+                log_always('cv %s = %s', metric, _frmt_score(value))
 
-            for metric in options.metric:
-                value = calculate_score(metric, y_true, cv_pred, config)
-                print 'cv %s: %s' % (metric, _frmt_score(value))
-            if show_num_features and num_features:
-                print 'cv num_features: %s' % np.mean(num_features)
+        if show_num_features and num_features:
+            log_always('cv num_features = %s', np.mean(num_features))
 
-        finally:
-            unlink(*folds)
+        if options.predictions:
+            write_file(options.predictions, cv_pred_txt)
 
-    if options.cv:
+        if options.raw_predictions:
+            write_file(options.raw_predictions, raw_cv_pred_txt)
+
         # all of these are related to CV if --cv is enabled
         options.predictions = None
         options.raw_predictions = None
-        options.audit = None
 
     final_regressor = options.final_regressor
 
@@ -2231,35 +2268,26 @@ def main(to_cleanup):
         to_cleanup.append(final_regressor_tmp)
 
     if final_regressor_tmp or not (options.cv or need_tuning):
-        vw_args = config['vw_train_options']
-
-        data_filename = None
-
-        if isinstance(vw_source, basestring):
-            assert os.path.exists(vw_source), vw_source
-            data_filename = vw_source
-            vw_stdin = None
-        else:
-            vw_stdin = vw_source.getvalue()
+        my_args = vw_args
 
         if options.initial_regressor:
-            vw_args += ' -i %s' % options.initial_regressor
+            my_args += ' -i %s' % options.initial_regressor
 
         predictions_fname = options.predictions
 
-        if options.metric or options.toperrors:
-            if not predictions_fname:
+        if calculated_metrics or options.toperrors:
+            if not predictions_fname or predictions_fname in STDOUT_NAMES:
                 predictions_fname = get_temp_filename('pred')
                 to_cleanup.append(predictions_fname)
 
         if predictions_fname:
-            vw_args += ' -p %s' % predictions_fname
+            my_args += ' -p %s' % predictions_fname
 
         if options.raw_predictions:
-            vw_args += ' -r %s' % options.raw_predictions
+            my_args += ' -r %s' % options.raw_predictions
 
         if options.audit:
-            vw_args += ' -a'
+            my_args += ' -a'
 
         if options.readable_model:
             readable_model = options.readable_model
@@ -2269,36 +2297,58 @@ def main(to_cleanup):
         else:
             readable_model = None
 
-        if '-t' not in vw_args.split():
-            vw_cmd = get_vw_train_command(to_cleanup, data_filename, final_regressor_tmp, vw_args, feature_mask_retrain=options.feature_mask_retrain, readable_model=readable_model)
-        else:
-            vw_cmd = '%s %s' % (VW_CMD, vw_args)
-            if data_filename:
-                vw_cmd += ' -d %s' % data_filename
+        vw_cmd = get_vw_command(
+            to_cleanup,
+            vw_filename,
+            final_regressor_tmp,
+            my_args,
+            feature_mask_retrain=options.feature_mask_retrain,
+            readable_model=readable_model)
 
-        system(vw_cmd, stdin=vw_stdin)
+        if len(vw_cmd) == 1 and vw_filename is None:
+            vw_cmd = vw_cmd[-1]
+
+            # don't want to capture stderr here, so vw_ metrics don't work there
+
+            if format == 'vw':
+                popen = Popen(vw_cmd, stdin=sys.stdin, log_level=1)
+            else:
+                popen = Popen(vw_cmd, stdin=subprocess.PIPE, log_level=1)
+                for row in open_anything(sys.stdin, format, ignoreheader=options.ignoreheader, force_unbuffered=options.linemode):
+                    # XXX weights
+                    line = convert_row_to_vw(row, columnspec=config.get('columnspec'), preprocessor=preprocessor)
+                    popen.stdin.write(line)
+                    # subprocess.Popen is unbuffered by default
+                popen.stdin.close()
+
+            if popen.wait() != 0:
+                sys.exit(1)
+        else:
+            system(vw_cmd)
+
+        if options.predictions in STDOUT_NAMES and options.predictions != predictions_fname:
+            for line in open(predictions_fname):
+                sys.stdout.write(line)
 
         y_pred = None
 
-        if options.metric and predictions_fname:
+        if options.toperrors or calculated_metrics:
+            assert predictions_fname is not None
             assert y_true is not None
-            y_pred = np.array(_load_first_float_from_each_string(predictions_fname, len(y_true)))
+            y_pred = _load_first_float_from_each_string(predictions_fname, len(y_true))
 
-            for metric in options.metric:
-                print '%s: %s' % (metric, _frmt_score(calculate_score(metric, y_true, y_pred, config)))
+        for metric in calculated_metrics:
+            log_always('%s = %s', metric, _frmt_score(calculate_score(metric, y_true, y_pred, config)))
 
-            if show_num_features and readable_model:
-                print 'num_features: %s' % get_num_features(readable_model)
+        if show_num_features and readable_model:
+            log_always('num_features = %s', get_num_features(readable_model))
 
         if options.toperrors:
             assert y_true is not None
 
-            if y_pred is None:
-                y_pred = np.array(_load_first_float_from_each_string(predictions_fname, len(y_true)))
-
             errors = []
 
-            for yp, yt, example in zip(y_pred, y_true, open_anything(source or filename, format, ignoreheader=options.ignoreheader)):
+            for yp, yt, example in zip(y_pred, y_true, open_anything(filename, format, ignoreheader=options.ignoreheader)):
                 # add hash of the example as a second item so that we get a mix of false positives and false negatives for a given error level
                 errors.append((abs(yp - yt), hash(repr(example)), yp, example))
 
@@ -2330,12 +2380,8 @@ def main(to_cleanup):
     if options.savefeatures:
         vw_cmd = VW_CMD
 
-        if isinstance(vw_source, basestring):
-            assert os.path.exists(vw_source), vw_source
-            vw_cmd += ' -d %s' % (vw_source, )
-            vw_stdin = None
-        else:
-            vw_stdin = vw_source.getvalue()
+        assert vw_filename
+        vw_cmd += ' -d %s' % (vw_filename, )
 
         regressor = final_regressor or options.initial_regressor
 
