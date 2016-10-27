@@ -8,6 +8,9 @@ def system(cmd):
         sys.exit(1)
 
 
+if not os.path.exists('bincache'):
+    os.mkdir('bincache')
+
 if not os.path.exists('bincache/vw'):
     system('git clone --depth 1 https://github.com/JohnLangford/vowpal_wabbit.git /tmp/vw')
     system('cd /tmp/vw && make')
