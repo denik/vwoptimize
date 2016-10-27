@@ -1540,13 +1540,16 @@ metrics_shortcuts = {
     'recall': 'recall_score',
     'f1': 'f1_score',
     'cm': 'confusion_matrix',
+    'hinge': 'hinge_loss',
 }
 
 metrics_param = {
     'mean_squared_error': 'y_score',
     'root_mean_squared_error': 'y_score',
+    'hinge_loss': 'y_score',
     'roc_auc_score': 'y_score',
     'brier_score_loss': 'y_prob',
+    'log_loss': 'y_prob',
     'accuracy_score': 'y_pred',
     'precision_score': 'y_pred',
     'recall_score': 'y_pred',
