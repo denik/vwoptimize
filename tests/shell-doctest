@@ -1,0 +1,191 @@
+#!/usr/bin/env python
+# copied from
+# https://bitbucket.org/michilu/shell-doctest/src/f0a552857102dd6be85c0c4192dd581339a7b28f/shelldoctest/?at=default
+# with fixed exit code
+"""
+Shell Doctest module.
+
+:Copyright: (c) 2009, the Shell Doctest Team All rights reserved.
+:license: BSD, see LICENSE for more details.
+"""
+
+import StringIO
+import fnmatch
+import imp
+import os.path
+
+import shelldoctest
+
+TMP_SHELL_EXT = ".sh.py"
+
+def _get_file_lists(target_paths):
+    exists = list()
+    no_exists = list()
+    for path in target_paths:
+        if not os.path.exists(path):
+            no_exists.append(path)
+        elif os.path.isfile(path):
+            exists.append(path)
+        else:
+            for i in os.walk(path):
+                if not i:
+                    continue
+                parent, dirs, files = i
+                for f in files:
+                    exists.append(os.path.sep.join([parent, f]))
+    return exists, no_exists
+
+def _get_mod_files(file_lists):
+    results = list()
+    to_mod_name = lambda x: os.path.splitext(x)[0].replace(os.path.sep, ".")
+    for f in file_lists:
+        if f.startswith("./"):
+            f = f[2:]
+        _f = os.path.basename(f)
+        if _f.endswith(TMP_SHELL_EXT):
+            continue
+        elif fnmatch.fnmatch(_f, "test*.py"):
+            results.append((to_mod_name(f), f))
+        elif fnmatch.fnmatch(_f, "test*.sh"):
+            tmp_name = "%s.py" % f
+            tmp_file = open(tmp_name, "w")
+            tmp_file.write('"""\n')
+            tmp_file.write(open(f).read())
+            tmp_file.write('"""\n')
+            tmp_file.close()
+            results.append((to_mod_name(f), tmp_name))
+    return results
+
+def _pre(argv):
+    if not argv:
+        argv = ["."]
+    file_lists, labels = _get_file_lists(argv)
+    if not file_lists:
+        file_lists, _labels = _get_file_lists(["."])
+    mod_files = _get_mod_files(file_lists)
+    return file_lists, mod_files, labels
+
+def _dry_run(mod, filters):
+    tests = _get_tests(mod, filters=filters)
+    _BEFORE, _AFTER = [len(i) for i in shelldoctest._EXC_WRAPPER.split("%s")]
+    _AFTER = _AFTER + 1
+    for test in tests:
+        for ex in test.examples:
+            print "[%s] %s:%s:" % (ex.label, test.filename, ex.lineno)
+            print "$ %s" % ex.source[_BEFORE:-_AFTER]
+            print "----"
+            print ex.want
+
+def test(self, *argv):
+    """Run test.
+         %(CMD)s test [module...] [label...]
+    """
+    file_lists, mod_files, labels = _pre(argv)
+    failed = 0
+
+    for mod_name, f in mod_files:
+        if self.verbose_level <= 2:
+            _stderr = sys.stderr
+            sys.stderr = StringIO.StringIO()
+        try:
+            mod = imp.load_source(mod_name, f)
+        except ImportError, e:
+            self.status_message("%(mod_name)s:ImportError, %(e)s" % vars(), verbose_level=2)
+            continue
+        else:
+            self.status_message("Module:%(f)s" % vars(), verbose_level=2)
+            if DRY_RUN:
+                _dry_run(mod, filters=labels)
+            else:
+                r = shelldoctest.testmod(mod, verbose=self.verbose_level>2,
+                                    verbose_level=self.verbose_level, filters=labels)
+                failed += r.failed
+        finally:
+            if self.verbose_level <= 2:
+                sys.stderr = _stderr
+
+    if failed:
+        sys.exit(1)
+
+def labels(self, *argv):
+    """Displays labels in tests.
+    """
+    _file_lists, mod_files, _labels = _pre(argv)
+    for mod_name, f in mod_files:
+        if self.verbose_level <= 2:
+            _stderr = sys.stderr
+            sys.stderr = StringIO.StringIO()
+        try:
+            mod = imp.load_source(mod_name, f)
+        except ImportError, e:
+            self.status_message("%(mod_name)s:ImportError, %(e)s" % vars(), verbose_level=2)
+            continue
+        else:
+            self.status_message("Module:%(f)s" % vars(), verbose_level=2)
+            _print_labels(self, mod)
+        finally:
+            if self.verbose_level <= 2:
+                sys.stderr = _stderr
+
+DRY_RUN = False
+def option_handler_dry_run(self):
+    """Turn on dry run mode.
+    """
+    global DRY_RUN
+    DRY_RUN = True
+
+from shelldoctest import *
+def _get_tests(m=None, name=None, globs=None, verbose=None,
+            report=True, optionflags=doctest.ELLIPSIS, extraglobs=None,
+            raise_on_error=False, exclude_empty=False,
+            verbose_level=None, filters=None,
+            ):
+    if globs == None:
+        globs = dict()
+    globs.update({"system_command": system_command})
+    global master
+    if m is None:
+        m = sys.modules.get('__main__')
+    if not inspect.ismodule(m):
+        raise TypeError("testmod: module required; %r" % (m,))
+    if name is None:
+        name = m.__name__
+    finder = doctest.DocTestFinder(parser=ShellDocTestParser(), exclude_empty=exclude_empty)
+    if raise_on_error:
+        runner = doctest.DebugRunner(verbose=verbose, optionflags=optionflags)
+    else:
+        runner = ShellDocTestRunner(verbose=verbose, verbose_level=verbose_level, optionflags=optionflags)
+    tests = finder.find(m, name, globs=globs, extraglobs=extraglobs)
+    if filters:
+        _tests = list()
+        z = dict([(k,v) for v,k in enumerate(filters)])
+        for test in tests:
+            test.examples = sorted(filter(lambda x: x.label in filters, test.examples),
+                                cmp=lambda x,y: cmp(z[x.label], z[y.label]))
+            _tests.append(test)
+        tests = _tests
+    return tests
+
+def _print_labels(self, mod):
+    tests = _get_tests(mod, verbose=self.verbose_level>2,
+                                    verbose_level=self.verbose_level, filters=None)
+    [[sys.stdout.write("[%s] %s:%s:\n" % (ex.label, test.filename, ex.lineno))
+        for ex in test.examples if ex.label] for test in tests]
+
+def clean(self, *argv):
+    """Remove `test*.sh.py` files.
+    """
+    if not argv:
+        argv = ["."]
+    file_lists, labels = _get_file_lists(argv)
+    for f in file_lists:
+        if f.endswith(TMP_SHELL_EXT):
+            print "Removed %(f)s" % vars()
+            if DRY_RUN:
+                continue
+            os.remove(f)
+
+if __name__ == "__main__":
+    from shelldoctest import base_app
+    base_app.start_app()
+
