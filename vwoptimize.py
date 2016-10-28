@@ -29,6 +29,7 @@ STDOUT_NAMES = ('/dev/stdout', 'stdout')
 VW_CMD = 'vw'
 VOWPAL_WABBIT_ERRORS = "error|won't work right|errno|can't open|vw::vw_exception"
 DEFAULT_COLUMNSPEC = 'y,text,*'
+METRIC_FORMAT = 'mean'
 
 
 for path in '.vwoptimize /tmp/vwoptimize'.split():
@@ -1089,6 +1090,9 @@ def vw_optimize_over_cv(vw_filename, nfolds, args, metric, config,
 
         result = calculate_or_extract_score(metric, y_true, y_pred, config, outputs, raise_on_error=True)
 
+        if isinstance(result, list):
+            result = np.mean(result)
+
         if not isinstance(result, (int, long, float)):
             sys.exit('Bad metric for tuning: %s (value=%r)' % (metric, result))
 
@@ -1105,7 +1109,7 @@ def vw_optimize_over_cv(vw_filename, nfolds, args, metric, config,
         other_results = ' '.join(['%s=%s' % x for x in other_scores])
 
         if num_features:
-            other_results += ' num_features=%s' % np.mean(num_features)
+            other_results += ' num_features=%s' % _frmt_score(num_features)
 
         if other_results:
             other_results = '  ' + other_results
@@ -1667,7 +1671,7 @@ def extract_score(metric, outputs):
     except Exception:
         return None
 
-    return np.mean(values)
+    return values
 
 
 def calculate_score(metric, y_true, y_pred, config):
@@ -1861,6 +1865,11 @@ def parseaudit(source):
 
 
 def _frmt_score(x):
+    if isinstance(x, list):
+        if METRIC_FORMAT == 'mean':
+            x = np.mean(x)
+        else:
+            return str(x)
     if isinstance(x, float):
         if x < 0:
             x = -x
@@ -1871,6 +1880,11 @@ def _frmt_score(x):
 def _frmt_score_short(x):
     if isinstance(x, basestring):
         return x.strip().split()[0].strip(':')
+    if isinstance(x, list):
+        if METRIC_FORMAT == 'mean':
+            x = np.mean(x)
+        else:
+            return str(x)
     if isinstance(x, float):
         if x < 0:
             x = -x
@@ -1948,6 +1962,7 @@ def main(to_cleanup):
     parser.add_option('--workers', type=int)
     parser.add_option('--nfolds', type=int, default=10)
     parser.add_option('--metric', action='append')
+    parser.add_option('--metricformat')
 
     # class weight option
     parser.add_option('--weight', action='append', help='Class weights to use in CLASS:WEIGHT format', default=[])
@@ -2003,6 +2018,7 @@ def main(to_cleanup):
 
     globals()['LOG_LEVEL'] += options.lesslogs - options.morelogs + (args.count('--quiet'))
     globals()['KEEPTMP'] = options.keeptmp
+    globals()['METRIC_FORMAT'] = options.metricformat or METRIC_FORMAT
 
     if options.tmpstart:
         globals()['TMP_START'] = options.tmpstart
@@ -2261,7 +2277,7 @@ def main(to_cleanup):
                 log_always('cv %s = %s', metric, _frmt_score(value))
 
         if show_num_features and num_features:
-            log_always('cv num_features = %s', np.mean(num_features))
+            log_always('cv num_features = %s', _frmt_score(num_features))
 
         if options.predictions:
             write_file(options.predictions, cv_pred_txt)

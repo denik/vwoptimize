@@ -11,6 +11,14 @@ average  since         example        example  current  current  current
 average loss = 0.620000
 acc = 0.38
 
+[metricformat_raw]
+$ vwoptimize.py -d small_ag_news.csv --oaa 4 --metric acc --quiet --metricformat raw
+(0)acc = 0.38
+
+[metricformat_raw_cv]
+$ vwoptimize.py -d small_ag_news.csv --oaa 4 --metricformat raw --cv
+(0)cv vw_average_loss = [0.2, 0.4, 0.6, 0.4, 0.4, 0.4, 0.6, 0.6, 0.8, 0.4]
+
 [normal_run_write_model]
 $ vwoptimize.py -d small_ag_news.csv --oaa 4 -b 20 --writeconfig tmp_config -f tmp_model --quiet --morelogs --tmpstart hello
 (0)write config = tmp_config
@@ -101,7 +109,7 @@ $ vwoptimize.py -d iris.vw --cv --oaa 3 --metric acc,num_features,vw_average_los
 (0)cv acc = 0.68
 cv vw_average_loss = 0.32
 cv vw_train_passes_used = 7.4
-cv num_features = 15.0
+cv num_features = 15
 
 [cv_bad_metrics_multiclass_mse]
 $ vwoptimize.py -d small_ag_news.csv --cv --oaa 4 --metric mse
