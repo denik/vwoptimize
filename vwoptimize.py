@@ -1908,6 +1908,38 @@ def remove_option(args, name, argument):
     return args
 
 
+def print_toperrors(toperrors, y_true, y_pred, filename, format, ignoreheader):
+    assert y_true is not None
+    assert y_pred is not None
+    assert filename is not None
+    assert len(y_true) == len(y_pred), (len(y_true), len(y_pred))
+
+    errors = []
+
+    for yp, yt, example in zip(y_pred, y_true, open_anything(filename, format, ignoreheader=ignoreheader)):
+        # add hash of the example as a second item so that we get a mix of false positives and false negatives for a given error level
+        errors.append((abs(yp - yt), hash(repr(example)), yp, example))
+
+    errors.sort(reverse=True)
+
+    if '.' in toperrors:
+        min_error = float(toperrors)
+        errors = [x for x in errors if x[0] >= min_error]
+    else:
+        count = int(toperrors)
+        errors = errors[:count]
+
+    output = csv.writer(sys.stdout)
+
+    for err, _hash, yp, example in errors:
+        row = [yp]
+        if isinstance(example, list):
+            row.extend(example)
+        else:
+            row.append(str(example))
+        output.writerow(row)
+
+
 def main(to_cleanup):
     parser = PassThroughOptionParser()
 
@@ -2090,7 +2122,7 @@ def main(to_cleanup):
 
     y_true = None
 
-    if calculated_metrics or options.cv or need_tuning or options.savefeatures or options.feature_mask_retrain is not None:
+    if calculated_metrics or options.cv or need_tuning or options.savefeatures or options.feature_mask_retrain is not None or options.toperrors:
         # cannot work with stdin, write it to a temp file
         if filename is None:
             filename = get_temp_filename(format)
@@ -2116,7 +2148,8 @@ def main(to_cleanup):
 
     is_multiclass = any([read_argument(args, '--' + x) for x in 'oaa ect csoaa log_multi recall_tree'.split()])
 
-    if calculated_metrics:
+    if calculated_metrics or options.toperrors:
+        assert filename is not None
         y_true = read_y_true(filename, format, config.get('columnspec'), options.ignoreheader, config.get('named_labels'))
         if not len(y_true):
             sys.exit('%s is empty' % filename)
@@ -2214,7 +2247,7 @@ def main(to_cleanup):
             options.nfolds,
             vw_args,
             workers=options.workers,
-            with_predictions=bool(calculated_metrics) or options.predictions,
+            with_predictions=bool(calculated_metrics) or options.predictions or options.toperrors,
             with_raw_predictions=bool(options.raw_predictions),
             feature_mask_retrain=options.feature_mask_retrain,
             calc_num_features=show_num_features,
@@ -2236,9 +2269,13 @@ def main(to_cleanup):
         if options.raw_predictions:
             write_file(options.raw_predictions, raw_cv_pred_txt)
 
+        if options.toperrors:
+            print_toperrors(options.toperrors, y_true, cv_pred, filename=filename, format=format, ignoreheader=options.ignoreheader)
+
         # all of these are related to CV if --cv is enabled
         options.predictions = None
         options.raw_predictions = None
+        options.toperror = None
 
     final_regressor = options.final_regressor
 
@@ -2344,32 +2381,7 @@ def main(to_cleanup):
             log_always('num_features = %s', get_num_features(readable_model))
 
         if options.toperrors:
-            assert y_true is not None
-
-            errors = []
-
-            for yp, yt, example in zip(y_pred, y_true, open_anything(filename, format, ignoreheader=options.ignoreheader)):
-                # add hash of the example as a second item so that we get a mix of false positives and false negatives for a given error level
-                errors.append((abs(yp - yt), hash(repr(example)), yp, example))
-
-            errors.sort(reverse=True)
-
-            if '.' in options.toperrors:
-                min_error = float(options.toperrors)
-                errors = [x for x in errors if x[0] >= min_error]
-            else:
-                count = int(options.toperrors)
-                errors = errors[:count]
-
-            output = csv.writer(sys.stdout)
-
-            for err, _hash, yp, example in errors:
-                row = [yp]
-                if isinstance(example, list):
-                    row.extend(example)
-                else:
-                    row.append(str(example))
-                output.writerow(row)
+            print_toperrors(options.toperrors, y_true, y_pred, filename=filename, format=format, ignoreheader=options.ignoreheader)
 
     if final_regressor_tmp:
         os.rename(final_regressor_tmp, final_regressor)

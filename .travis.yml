@@ -16,4 +16,4 @@ install:
 script:
  - python -c 'import vwoptimize, doctest; doctest.testmod(vwoptimize)'
  - cd tests && python ./shell-doctest --verbose=2 test && cd ..
- - flake8 --max-line-length=180 . --ignore E402
+ - flake8 --max-line-length=300 --ignore E402 .
