@@ -31,6 +31,17 @@ VOWPAL_WABBIT_ERRORS = "error|won't work right|errno|can't open|vw::vw_exception
 DEFAULT_COLUMNSPEC = 'y,text,*'
 METRIC_FORMAT = 'mean'
 
+AWK_TRAINSET = "awk '(NR - $fold) % NFOLDS != 0' VW |"
+AWK_TESTSET = "awk '(NR - $fold) % NFOLDS == 0' VW |"
+PERL_TRAINSET = "perl -nE 'if ((++$NR - $fold) % NFOLDS != 0) { print $_ }' VW |"
+PERL_TESTSET = "perl -nE 'if ((++$NR - $fold) % NFOLDS == 0) { print $_ }' VW |"
+
+if 'darwin' in sys.platform:
+    # awk is slow on Mac OS X
+    FOLDSCRIPT = 'perl'
+else:
+    FOLDSCRIPT = 'awk'
+
 
 for path in '.vwoptimize /tmp/vwoptimize'.split():
     if os.path.exists(path):
@@ -556,8 +567,17 @@ def vw_cross_validation(
     # 4 -> 1
     # and so on
 
-    AWK_TRAINSET = "awk '(NR - $fold) % NFOLDS != 0' VW |".replace('NFOLDS', str(nfolds)).replace('VW', vw_filename)
-    AWK_TESTSET = "awk '(NR - $fold) % NFOLDS == 0' VW |".replace('NFOLDS', str(nfolds)).replace('VW', vw_filename)
+    if FOLDSCRIPT == 'awk':
+        trainset = AWK_TRAINSET
+        testset = AWK_TESTSET
+    elif FOLDSCRIPT == 'perl':
+        trainset = PERL_TRAINSET
+        testset = PERL_TESTSET
+    else:
+        raise AssertionError('foldscript=%r not understood' % FOLDSCRIPT)
+
+    trainset = trainset.replace('NFOLDS', str(nfolds)).replace('VW', vw_filename)
+    testset = testset.replace('NFOLDS', str(nfolds)).replace('VW', vw_filename)
 
     model_filename = get_temp_filename('model') + '.$fold'
 
@@ -584,7 +604,7 @@ def vw_cross_validation(
 
     base_training_command = get_vw_command(
         cleanup_tmpl,
-        AWK_TRAINSET,
+        trainset,
         model_filename,
         vw_args,
         feature_mask_retrain=feature_mask_retrain,
@@ -597,7 +617,7 @@ def vw_cross_validation(
         else:
             item['args'] += ' --quiet'
 
-    testing_command = '%s %s -t -i %s %s %s' % (AWK_TESTSET, VW_CMD, model_filename, with_p, with_r)
+    testing_command = '%s %s -t -i %s %s %s' % (testset, VW_CMD, model_filename, with_p, with_r)
     testing_command = {'args': testing_command, 'name': 'test'}
 
     if capture_output is True or 'test' in capture_output:
@@ -2013,6 +2033,7 @@ def main(to_cleanup):
     parser.add_option('--feature_mask_retrain_args')
 
     parser.add_option('--tmpstart')
+    parser.add_option('--foldscript')
 
     options, args = parser.parse_args()
 
@@ -2022,6 +2043,10 @@ def main(to_cleanup):
 
     if options.tmpstart:
         globals()['TMP_START'] = options.tmpstart
+
+    if options.foldscript:
+        assert options.foldscript in ('perl', 'awk'), options.foldscript
+        globals()['FOLDSCRIPT'] = options.foldscript
 
     if options.parseaudit:
         parseaudit(sys.stdin)
