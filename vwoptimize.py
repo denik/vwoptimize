@@ -63,6 +63,16 @@ def htmlparser_unescape(text, cache=[]):
     return cache[0].unescape(text)
 
 
+def _unlink_one(filename):
+    if not os.path.exists(filename):
+        return
+    try:
+        os.unlink(filename)
+    except Exception:
+        sys.stderr.write('Failed to unlink %r\n' % filename)
+        traceback.print_exc()
+
+
 def unlink(*filenames):
     if KEEPTMP:
         return
@@ -70,14 +80,10 @@ def unlink(*filenames):
         if not filename:
             continue
         if not isinstance(filename, basestring):
-            sys.exit('unlink() expects list of strings: %r\n' % (filenames, ))
-        if not os.path.exists(filename):
-            continue
-        try:
-            os.unlink(filename)
-        except Exception:
-            sys.stderr.write('Failed to unlink %r\n' % filename)
-            traceback.print_exc()
+            sys.exit('unlink() expects filenames as str or None, not %r\n' % (filename, ))
+        _unlink_one(filename)
+        # vowpal wabbit might create this and then not clean up
+        _unlink_one(filename + '.writing')
 
 
 def kill(*jobs, **kwargs):
