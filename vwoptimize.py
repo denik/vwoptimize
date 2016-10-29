@@ -22,7 +22,7 @@ import numpy as np
 
 csv.field_size_limit(10000000)
 LOG_LEVEL = 1
-TMP_START = str(os.getpid())
+TMPID = str(os.getpid())
 KEEPTMP = False
 STDIN_NAMES = ('/dev/stdin', '-')
 STDOUT_NAMES = ('/dev/stdout', 'stdout')
@@ -127,7 +127,7 @@ def get_real_ext(filename):
 
 def get_temp_filename(suffix, counter=[0]):
     counter[0] += 1
-    fname = '%s/%s.%s.%s' % (TMP_PREFIX, TMP_START, counter[0], suffix)
+    fname = '%s/%s.%s.%s' % (TMP_PREFIX, TMPID, counter[0], suffix)
     assert not os.path.exists(fname), 'internal error: %s' % fname
     return fname
 
@@ -2032,7 +2032,7 @@ def main(to_cleanup):
     parser.add_option('--feature_mask_retrain', action='store_true')
     parser.add_option('--feature_mask_retrain_args')
 
-    parser.add_option('--tmpstart')
+    parser.add_option('--tmpid')
     parser.add_option('--foldscript')
 
     options, args = parser.parse_args()
@@ -2041,8 +2041,8 @@ def main(to_cleanup):
     globals()['KEEPTMP'] = options.keeptmp
     globals()['METRIC_FORMAT'] = options.metricformat or METRIC_FORMAT
 
-    if options.tmpstart:
-        globals()['TMP_START'] = options.tmpstart
+    if options.tmpid:
+        globals()['TMPID'] = options.tmpid
 
     if options.foldscript:
         assert options.foldscript in ('perl', 'awk'), options.foldscript

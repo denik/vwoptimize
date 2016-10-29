@@ -20,7 +20,7 @@ $ vwoptimize.py -d small_ag_news.csv --oaa 4 --metricformat raw --cv
 (0)cv vw_average_loss = [0.2, 0.4, 0.6, 0.4, 0.4, 0.4, 0.6, 0.6, 0.8, 0.4]
 
 [normal_run_write_model]
-$ vwoptimize.py -d small_ag_news.csv --oaa 4 -b 20 --writeconfig tmp_config -f tmp_model --quiet --morelogs --tmpstart hello
+$ vwoptimize.py -d small_ag_news.csv --oaa 4 -b 20 --writeconfig tmp_config -f tmp_model --quiet --morelogs --tmpid hello
 (0)write config = tmp_config
 + vw -d .vwoptimize/hello.1.vw -f tmp_model.tmp --oaa 4 -b 20 --quiet
 
@@ -38,13 +38,13 @@ loss     last          counter         weight    label  predict features
 average loss = 0.000000
 
 [feature_mask_retrain_write_model]
-$ vwoptimize.py -d small_ag_news.csv --oaa 4 -b 15 --writeconfig tmp_config -f tmp_model --quiet --morelogs --tmpstart hello --feature_mask_retrain
+$ vwoptimize.py -d small_ag_news.csv --oaa 4 -b 15 --writeconfig tmp_config -f tmp_model --quiet --morelogs --tmpid hello --feature_mask_retrain
 (0)write config = tmp_config
 + [1] vw -d .vwoptimize/hello.1.vw -f tmp_model.tmp.feature_mask --oaa 4 -b 15 --quiet
 + [2] vw -d .vwoptimize/hello.1.vw --quiet -f tmp_model.tmp --feature_mask tmp_model.tmp.feature_mask -i tmp_model.tmp.feature_mask
 
 [feature_mask_retrain_read_model_t]
-$ vwoptimize.py -d small_ag_news.csv --readconfig tmp_config --tmpstart hey -t 2>&1 | egrep '\+|bits|loss|only'
+$ vwoptimize.py -d small_ag_news.csv --readconfig tmp_config --tmpid hey -t 2>&1 | egrep '\+|bits|loss|only'
 + vw -d .vwoptimize/hey.1.vw -t -i tmp_model
 only testing
 Num weight bits = 15
@@ -60,7 +60,7 @@ $ vwoptimize.py -d small_ag_news.csv --cv --oaa 4 --metric vw_average_loss  # th
 (0)cv vw_average_loss = 0.48
 
 [cv_run_write_model]
-$ vwoptimize.py -d small_ag_news.csv --cv --ect 4 -b 21 --writeconfig tmp_config1 -f tmp_model1 --quiet --morelogs --tmpstart hello
+$ vwoptimize.py -d small_ag_news.csv --cv --ect 4 -b 21 --writeconfig tmp_config1 -f tmp_model1 --quiet --morelogs --tmpid hello
 (0)cv vw_average_loss = 0.46
 write config = tmp_config1
 + vw -d .vwoptimize/hello.1.vw -f tmp_model1.tmp --ect 4 -b 21 --quiet
