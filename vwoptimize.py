@@ -573,17 +573,21 @@ def vw_cross_validation(
     # 4 -> 1
     # and so on
 
-    if FOLDSCRIPT == 'awk':
-        trainset = AWK_TRAINSET
-        testset = AWK_TESTSET
-    elif FOLDSCRIPT == 'perl':
-        trainset = PERL_TRAINSET
-        testset = PERL_TESTSET
+    if nfolds == 1:
+        trainset = vw_filename
+        testset = None
     else:
-        raise AssertionError('foldscript=%r not understood' % FOLDSCRIPT)
+        if FOLDSCRIPT == 'awk':
+            trainset = AWK_TRAINSET
+            testset = AWK_TESTSET
+        elif FOLDSCRIPT == 'perl':
+            trainset = PERL_TRAINSET
+            testset = PERL_TESTSET
+        else:
+            raise AssertionError('foldscript=%r not understood' % FOLDSCRIPT)
 
-    trainset = trainset.replace('NFOLDS', str(nfolds)).replace('VW', vw_filename)
-    testset = testset.replace('NFOLDS', str(nfolds)).replace('VW', vw_filename)
+        trainset = trainset.replace('NFOLDS', str(nfolds)).replace('VW', vw_filename)
+        testset = testset.replace('NFOLDS', str(nfolds)).replace('VW', vw_filename)
 
     model_filename = get_temp_filename('model') + '.$fold'
 
@@ -623,15 +627,22 @@ def vw_cross_validation(
         else:
             item['args'] += ' --quiet'
 
-    testing_command = '%s %s -t -i %s %s %s' % (testset, VW_CMD, model_filename, with_p, with_r)
-    testing_command = {'args': testing_command, 'name': 'test'}
+    if testset:
+        testing_command = '%s %s -t -i %s %s %s' % (testset, VW_CMD, model_filename, with_p, with_r)
+        testing_command = {'args': testing_command, 'name': 'test'}
 
-    if capture_output is True or 'test' in capture_output:
-        testing_command['stderr'] = subprocess.PIPE
+        if capture_output is True or 'test' in capture_output:
+            testing_command['stderr'] = subprocess.PIPE
+        else:
+            testing_command['args'] += ' --quiet'
+
+        base_training_command.append(testing_command)
     else:
-        testing_command['args'] += ' --quiet'
+        if with_p:
+            base_training_command[-1]['args'] += ' ' + with_p
 
-    base_training_command.append(testing_command)
+        if with_r:
+            base_training_command[-1]['args'] += ' ' + with_r
 
     for item in base_training_command:
         log("+ %s", item)
@@ -1695,6 +1706,8 @@ def extract_score(metric, outputs):
     try:
         values = [float(x) for x in values]
     except Exception:
+        if values[0].endswith(' h'):
+            return values
         return None
 
     return values
@@ -1890,31 +1903,47 @@ def parseaudit(source):
             print item
 
 
+def mean_h(values):
+    if not values:
+        return str(values)
+    suffix = ''
+    if isinstance(values[0], basestring):
+        if all(x.endswith(' h') for x in values):
+            values = [x[:-2] for x in values]
+            values = [float(x) for x in values]
+            suffix = ' h'
+        else:
+            return str(values)
+    return np.mean(values), suffix
+
+
 def _frmt_score(x):
+    suffix = ''
     if isinstance(x, list):
         if METRIC_FORMAT == 'mean':
-            x = np.mean(x)
+            x, suffix = mean_h(x)
         else:
             return str(x)
     if isinstance(x, float):
         if x < 0:
             x = -x
-        return '%g' % x
+        return '%g%s' % (x, suffix)
     return str(x)
 
 
 def _frmt_score_short(x):
+    suffix = ''
     if isinstance(x, basestring):
         return x.strip().split()[0].strip(':')
     if isinstance(x, list):
         if METRIC_FORMAT == 'mean':
-            x = np.mean(x)
+            x, suffix = mean_h(x)
         else:
             return str(x)
     if isinstance(x, float):
         if x < 0:
             x = -x
-        return '%.4f' % x
+        return '%.4f%s' % (x, suffix)
     return str(x)
 
 

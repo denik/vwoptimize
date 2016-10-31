@@ -199,12 +199,12 @@ welcome | Hello World!
 bye | Goodbye World.
 welcome | hello
 
-[nfolds1]
+[nfolds_25]
 $ vwoptimize.py -d iris.vw --metric vw_train_weighted_example_sum,vw_average_loss --oaa 3 --cv --nfolds 25
 (0)cv vw_train_weighted_example_sum = 144
 cv vw_average_loss = 0.333333
 
-[nfolds2]
+[nfolds_2]
 $ vwoptimize.py -d iris.vw --metric vw_train_weighted_example_sum,vw_average_loss --oaa 3 --cv --nfolds 2
 (0)cv vw_train_weighted_example_sum = 75
 cv vw_average_loss = 0.32
@@ -219,7 +219,7 @@ $ head -n 50 iris.vw | vwoptimize.py --metric vw_train_weighted_example_sum,vw_a
 (0)cv vw_train_weighted_example_sum = 48.9796
 cv vw_average_loss = 0.234694
 
-[nfolds_error]
+[nfolds_too_many]
 $ head -n 50 iris.vw | vwoptimize.py --metric vw_train_weighted_example_sum,vw_average_loss --oaa 3 --cv --nfolds 51
 (0)cv vw_train_weighted_example_sum = 49.0196
 cv vw_average_loss = nan
@@ -279,6 +279,47 @@ $ diff tmp_vw_model tmp_model_after_cv
 [cv_predictions_readable_model]
 $ diff -u tmp_readable_model tmp_readable_model_after_cv
 <BLANKLINE>
+
+[progressive_validation_vw]
+$ printf '1 | hello\\n-1 | world' | vw 2>&1 | grep 'average loss'
+average loss = 1.285535
+
+[nfolds1]
+$ printf '1 | hello\\n-1 | world' | vwoptimize.py --nfolds 1 -p /dev/stdout
+(0)cv vw_train_average_loss = 1.28554
+0
+0.253423
+
+[nfolds1_raw]
+$ printf '1 | hello\\n-1 | world' | vwoptimize.py --nfolds 1 -r /dev/stdout --metric mse
+(0)cv mse = 1.28553
+0
+0.253423
+
+[nfolds2]
+$ printf '1 | hello\\n-1 | world' | vwoptimize.py --nfolds 2 -p /dev/stdout
+(0)cv vw_average_loss = 1.57107
+-0.253423
+0.253423
+
+[nfolds2_raw]
+$ printf '1 | hello\\n-1 | world' | vwoptimize.py --nfolds 2 -r /dev/stdout --metric mse
+(0)cv mse = 1.57107
+-0.253423
+0.253423
+
+[nfolds3]
+$ printf '1 | hello\\n-1 | world' | vwoptimize.py --nfolds 3
+(0)cv vw_average_loss = nan
+
+[holdout_validation_nfolds2]
+$ vwoptimize.py -d iris.vw --nfolds 2 --passes 2 -c -k --metric vw_train_average_loss,vw_average_loss
+(0)cv vw_train_average_loss = 0.165788 h
+cv vw_average_loss = 0.0690075
+
+[holdout_validation_nfolds1]
+$ vwoptimize.py -d iris.vw --nfolds 1 --passes 2 -c -k
+(0)cv vw_train_average_loss = 0.116409 h
 
 [cleanup]
 $ ls .vwoptimize
