@@ -727,7 +727,9 @@ def parse_vw_output(output):
 
 def _load_first_float_from_each_string(file, size=None):
     filename = file
-    if hasattr(file, 'read'):
+    if isinstance(file, list):
+        filename = '<list>'
+    elif hasattr(file, 'read'):
         pass
     elif isinstance(file, basestring):
         file = open(file)
@@ -1115,16 +1117,7 @@ def vw_optimize_over_cv(vw_filename, nfolds, args, metric, config,
             if raw_pred_txt and len(y_true) != len(raw_pred_txt):
                 sys.exit('Internal error: expected %r raw predictions, got %r' % (len(y_true), len(raw_pred_txt)))
 
-        try:
-            y_pred = [float(x) for x in y_pred_txt]
-        except Exception:
-            for x in y_pred_txt:
-                try:
-                    float(x)
-                except Exception:
-                    sys.exit('Bad float: %r' % (x, ))
-            raise
-
+        y_pred = _load_first_float_from_each_string(y_pred_txt)
         result = calculate_or_extract_score(metric, y_true, y_pred, config, outputs, raise_on_error=True)
 
         if isinstance(result, list):
@@ -1386,7 +1379,7 @@ def read_y_true(filename, format, columnspec, ignoreheader, named_labels):
         y_true.append(label)
 
     if not named_labels:
-        y_true = np.array([float(x) for x in y_true])
+        y_true = _load_first_float_from_each_string(y_true)
 
     return y_true
 
@@ -2343,7 +2336,7 @@ def main(to_cleanup):
             calc_num_features=show_num_features,
             capture_output=set([_get_stage(m) for m in vw_metrics]))
 
-        cv_pred = [float(x) for x in cv_pred_txt]
+        cv_pred = _load_first_float_from_each_string(cv_pred_txt)
 
         for metric in options.metric:
             value = calculate_or_extract_score(metric, y_true, cv_pred, config, outputs)

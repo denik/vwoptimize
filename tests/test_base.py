@@ -321,6 +321,18 @@ cv vw_average_loss = 0.0690075
 $ vwoptimize.py -d iris.vw --nfolds 1 --passes 2 -c -k
 (0)cv vw_train_average_loss = 0.116409 h
 
+[nfolds1_tags]
+$ vwoptimize.py -d tags.vw --nfolds 1 -p /dev/stdout
+(0)cv vw_train_average_loss = 1.28554
+0 tag1
+0.253423 tag2
+
+[nfolds2_tags]
+$ vwoptimize.py -d tags.vw --nfolds 2 -p /dev/stdout
+(0)cv vw_average_loss = 1.57107
+-0.253423 tag1
+0.253423 tag2
+
 [cleanup]
 $ ls .vwoptimize
 <BLANKLINE>
