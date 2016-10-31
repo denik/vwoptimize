@@ -2156,7 +2156,14 @@ def main(to_cleanup):
             need_tuning = 1
             break
 
-    options.metric = _make_proper_list(options.metric) or ['vw_average_loss']
+    options.metric = _make_proper_list(options.metric)
+
+    if not options.metric:
+        if options.nfolds == 1:
+            options.metric = ['vw_train_average_loss']
+        else:
+            options.metric = ['vw_average_loss']
+
     show_num_features = 'num_features' in options.metric
     options.metric = [x for x in options.metric if 'num_features' != x]
 
