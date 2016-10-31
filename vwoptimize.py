@@ -1986,7 +1986,7 @@ def main(to_cleanup):
     # cross-validation and parameter tuning options
     parser.add_option('--cv', action='store_true')
     parser.add_option('--workers', type=int)
-    parser.add_option('--nfolds', type=int, default=10)
+    parser.add_option('--nfolds')
     parser.add_option('--metric', action='append')
     parser.add_option('--metricformat')
 
@@ -2057,6 +2057,13 @@ def main(to_cleanup):
     if options.parseaudit:
         parseaudit(sys.stdin)
         sys.exit(0)
+
+    if options.nfolds is not None:
+        options.nfolds = int(options.nfolds)
+        options.cv = True
+
+    if options.nfolds is None:
+        options.nfolds = 10
 
     if options.feature_mask_retrain_args:
         options.feature_mask_retrain = options.feature_mask_retrain_args
