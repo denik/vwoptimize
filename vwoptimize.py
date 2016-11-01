@@ -725,7 +725,7 @@ def parse_vw_output(output):
     return result
 
 
-def _load_first_float_from_each_string(file, size=None):
+def _load_first_float_from_each_string(file, size=None, with_text=False):
     filename = file
     if isinstance(file, list):
         filename = '<list>'
@@ -737,10 +737,14 @@ def _load_first_float_from_each_string(file, size=None):
         raise AssertionError(limited_repr(file))
 
     result = []
+    result_text = []
 
     for line in file:
         try:
-            result.append(float(line.split()[0]))
+            text = line.strip()
+            if with_text:
+                result_text.append(text)
+            result.append(float(text.split()[0]))
         except:
             sys.stderr.write('Error while parsing %r\nin %r\n' % (line, filename))
             raise
@@ -757,7 +761,10 @@ def _load_first_float_from_each_string(file, size=None):
 
             sys.exit('Too many items in %r: found %r, expecting multiply of %r' % (filename, len(result), size))
 
-    return np.array(result)
+    if with_text:
+        return np.array(result), result_text
+    else:
+        return np.array(result)
 
 
 class BaseParam(object):
@@ -1971,7 +1978,7 @@ def remove_option(args, name, argument):
     return args
 
 
-def print_toperrors(toperrors, y_true, y_pred, filename, format, ignoreheader):
+def print_toperrors(toperrors, y_true, y_pred, y_pred_text, filename, format, ignoreheader):
     assert y_true is not None
     assert y_pred is not None
     assert filename is not None
@@ -1979,9 +1986,9 @@ def print_toperrors(toperrors, y_true, y_pred, filename, format, ignoreheader):
 
     errors = []
 
-    for yp, yt, example in zip(y_pred, y_true, open_anything(filename, format, ignoreheader=ignoreheader)):
+    for yp, yp_text, yt, example in zip(y_pred, y_pred_text, y_true, open_anything(filename, format, ignoreheader=ignoreheader)):
         # add hash of the example as a second item so that we get a mix of false positives and false negatives for a given error level
-        errors.append((abs(yp - yt), hash(repr(example)), yp, example))
+        errors.append((abs(yp - yt), hash(repr(example)), yp_text.strip(), example))
 
     errors.sort(reverse=True)
 
@@ -1994,8 +2001,8 @@ def print_toperrors(toperrors, y_true, y_pred, filename, format, ignoreheader):
 
     output = csv.writer(sys.stdout)
 
-    for err, _hash, yp, example in errors:
-        row = [yp]
+    for err, _hash, yp_text, example in errors:
+        row = [yp_text]
         if isinstance(example, list):
             row.extend(example)
         else:
@@ -2354,7 +2361,7 @@ def main(to_cleanup):
             write_file(options.raw_predictions, raw_cv_pred_txt)
 
         if options.toperrors:
-            print_toperrors(options.toperrors, y_true, cv_pred, filename=filename, format=format, ignoreheader=options.ignoreheader)
+            print_toperrors(options.toperrors, y_true, cv_pred, cv_pred_txt, filename=filename, format=format, ignoreheader=options.ignoreheader)
 
         # all of these are related to CV if --cv is enabled
         options.predictions = None
@@ -2452,11 +2459,12 @@ def main(to_cleanup):
                 sys.stdout.write(line)
 
         y_pred = None
+        y_pred_text = None
 
         if options.toperrors or calculated_metrics:
             assert predictions_fname is not None
             assert y_true is not None
-            y_pred = _load_first_float_from_each_string(predictions_fname, len(y_true))
+            y_pred, y_pred_text = _load_first_float_from_each_string(predictions_fname, len(y_true), with_text=True)
 
         for metric in calculated_metrics:
             log_always('%s = %s', metric, _frmt_score(calculate_score(metric, y_true, y_pred, config)))
@@ -2465,7 +2473,7 @@ def main(to_cleanup):
             log_always('num_features = %s', get_num_features(readable_model))
 
         if options.toperrors:
-            print_toperrors(options.toperrors, y_true, y_pred, filename=filename, format=format, ignoreheader=options.ignoreheader)
+            print_toperrors(options.toperrors, y_true, y_pred, y_pred_text, filename=filename, format=format, ignoreheader=options.ignoreheader)
 
     if final_regressor_tmp:
         os.rename(final_regressor_tmp, final_regressor)

@@ -5,7 +5,7 @@ $ vwoptimize.py -d small_ag_news_binary.csv --strip_punct --lowercase --quiet --
 (0)cv acc = 0.72
 cv vw_average_loss = 0.778847
 cv vw_train_average_loss = 0.951884
--0.40328,1,Clearing Out Fannie #39;s  #39;Phantoms #39;,Score one for the lion tamer. The federal regulator that oversees home-mortgage giant Fannie Mae finally persuaded that government-sponsored enterprise to agree to clean up its questionable accounting practices.
+-0.403280,1,Clearing Out Fannie #39;s  #39;Phantoms #39;,Score one for the lion tamer. The federal regulator that oversees home-mortgage giant Fannie Mae finally persuaded that government-sponsored enterprise to agree to clean up its questionable accounting practices.
 
 [toperrors_cv_float_0.0]
 $ vwoptimize.py -d small_ag_news_binary.csv --strip_punct --lowercase --quiet --toperrors 0.0 --cv | wc -l
@@ -22,7 +22,7 @@ $ vwoptimize.py -d small_ag_news_binary.csv --strip_punct --lowercase --quiet --
 (0)cv acc = 0.72
 cv vw_average_loss = 0.778847
 cv vw_train_average_loss = 0.951884
--0.40328,1,Clearing Out Fannie #39;s  #39;Phantoms #39;,Score one for the lion tamer. The federal regulator that oversees home-mortgage giant Fannie Mae finally persuaded that government-sponsored enterprise to agree to clean up its questionable accounting practices.
+-0.403280,1,Clearing Out Fannie #39;s  #39;Phantoms #39;,Score one for the lion tamer. The federal regulator that oversees home-mortgage giant Fannie Mae finally persuaded that government-sponsored enterprise to agree to clean up its questionable accounting practices.
 
 [toperrors_cv_int_2]
 $ vwoptimize.py -d small_ag_news_binary.csv --strip_punct --lowercase --quiet --toperrors 2 --cv | wc -l
@@ -39,6 +39,9 @@ $ vwoptimize.py -d small_ag_news_binary.csv --strip_punct --lowercase --quiet --
 (0)cv vw_average_loss = 0.778847
 50
 
+[toperrors_train_int_1]
+$ vwoptimize.py -d small_ag_news_binary.csv --strip_punct --lowercase --quiet --toperrors 1
+-0.327153,1,Clearing Out Fannie #39;s  #39;Phantoms #39;,Score one for the lion tamer. The federal regulator that oversees home-mortgage giant Fannie Mae finally persuaded that government-sponsored enterprise to agree to clean up its questionable accounting practices.
 """
 
 import sys
