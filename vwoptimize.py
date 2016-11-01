@@ -728,7 +728,7 @@ def parse_vw_output(output):
 def _load_first_float_from_each_string(file, size=None, with_text=False):
     filename = file
     if isinstance(file, list):
-        filename = '<list>'
+        filename = file
     elif hasattr(file, 'read'):
         pass
     elif isinstance(file, basestring):
@@ -746,12 +746,12 @@ def _load_first_float_from_each_string(file, size=None, with_text=False):
                 result_text.append(text)
             result.append(float(text.split()[0]))
         except:
-            sys.stderr.write('Error while parsing %r\nin %r\n' % (line, filename))
+            sys.stderr.write('Error while parsing %r\nin %r\n' % (line, limited_repr(filename)))
             raise
 
     if size is not None:
         if len(result) < size:
-            sys.exit('Too few items in %r: found %r, expecting %r' % (filename, len(result), size))
+            sys.exit('Too few items in %s: found %r, expecting %r' % (limited_repr(filename), len(result), size))
 
         if len(result) > size:
             mult = int(len(result) / size)
@@ -759,7 +759,7 @@ def _load_first_float_from_each_string(file, size=None, with_text=False):
                 # if --passes N option was used, then the number of predictions will be N times higher
                 return np.array(result[-size:])
 
-            sys.exit('Too many items in %r: found %r, expecting multiply of %r' % (filename, len(result), size))
+            sys.exit('Too many items in %s: found %r, expecting multiply of %r' % (limited_repr(filename), len(result), size))
 
     if with_text:
         return np.array(result), result_text
