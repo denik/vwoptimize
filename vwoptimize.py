@@ -1118,7 +1118,10 @@ def vw_optimize_over_cv(vw_filename, nfolds, args, metric, config,
                 sys.exit('Internal error: expected %r raw predictions, got %r' % (len(y_true), len(raw_pred_txt)))
 
         y_pred = _load_first_float_from_each_string(y_pred_txt)
-        result = calculate_or_extract_score(metric, y_true, y_pred, config, outputs, raise_on_error=True)
+        result = calculate_or_extract_score(metric, y_true, y_pred, config, outputs)
+
+        if isinstance(result, basestring):
+            sys.exit('Cannot calculate %r: %s' % (metric, result))
 
         if isinstance(result, list):
             result = np.mean(result)
@@ -1659,14 +1662,12 @@ def is_loss(metric_name):
         return True
 
 
-def calculate_or_extract_score(metric, y_true, y_pred, config, outputs, raise_on_error=False):
+def calculate_or_extract_score(metric, y_true, y_pred, config, outputs):
     try:
         if metric.startswith('vw'):
             return extract_score(metric, outputs)
         return calculate_score(metric, y_true, y_pred, config)
     except Exception, ex:
-        if raise_on_error:
-            raise
         return '%s: %s' % (type(ex).__name__, ex)
 
 
