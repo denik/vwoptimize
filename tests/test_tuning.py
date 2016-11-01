@@ -8,6 +8,16 @@ Best preprocessor options = <none>
 Best vw options = --oaa 4 -b 18
 Best vw_average_loss = 0.4800
 
+[tuning1__nfolds1]
+$ vwoptimize.py -d small_ag_news.csv --nfolds 1 --oaa 4 -b 18/20?   # by default vw_train_average_loss is being tuned
+(0)Result vw --oaa 4 -b 18... vw_train_average_loss=0.6200
+Result vw --oaa 4 -b 20... vw_train_average_loss=0.6000*
+Best vw_train_average_loss with 'no preprocessing' = 0.6000*
+Best preprocessor options = <none>
+Best vw options = --oaa 4 -b 20
+Best vw_train_average_loss = 0.6000
+cv vw_train_average_loss = 0.6
+
 [tuning2]
 $ vwoptimize.py -d small_ag_news.csv --oaa 4 --metric vw_average_loss -b 18/20?   # same as above
 (0)Result vw --oaa 4 -b 18... vw_average_loss=0.4800
