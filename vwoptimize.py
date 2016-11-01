@@ -2104,7 +2104,7 @@ def main(to_cleanup):
         config = json.load(open(options.readconfig))
         log('vwoptimize config = %s', options.readconfig, log_level=1)
 
-        if 'regressor' in config and not options.initial_regressor:
+        if 'regressor' in config and options.initial_regressor is None:
             options.initial_regressor = os.path.normpath(os.path.join(os.path.dirname(options.readconfig), config['regressor']))
             if not os.path.exists(options.initial_regressor):
                 sys.exit('Cannot find %r referenced from %r' % (options.initial_regressor, options.readconfig))
