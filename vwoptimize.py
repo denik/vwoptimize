@@ -2010,6 +2010,16 @@ def print_toperrors(toperrors, y_true, y_pred, y_pred_text, filename, format, ig
         output.writerow(row)
 
 
+def cleanup_vw_train_options(vw_args):
+    vw_args = vw_args.split()
+    remove_option(vw_args, '--quiet', 0)
+    remove_option(vw_args, '-q', 0)
+    remove_option(vw_args, '--progress', 1)
+    remove_option(vw_args, '-P', 1)
+    remove_option(vw_args, '--threads', 0)
+    return ' '.join(vw_args)
+
+
 def main(to_cleanup):
     parser = PassThroughOptionParser()
 
@@ -2287,7 +2297,7 @@ def main(to_cleanup):
     if need_tuning:
         # QQQ --initial_regressor is not passed there
         assert not options.audit, '-a incompatible with parameter tuning'
-        config['vw_train_options'], preprocessor = main_tune(
+        vw_args, preprocessor = main_tune(
             metric=metric,
             config=config,
             filename=filename,
@@ -2299,12 +2309,16 @@ def main(to_cleanup):
             workers=options.workers,
             feature_mask_retrain=options.feature_mask_retrain,
             show_num_features=show_num_features)
-        if config['vw_train_options'] is None:
+        if vw_args is None:
             sys.exit('tuning failed')
         config['preprocessor'] = str(preprocessor)
-        vw_args = config['vw_train_options']
+        config['vw_train_options'] = cleanup_vw_train_options(vw_args)
     else:
         vw_args = ' '.join(args)
+        if options.initial_regressor == '' and config.get('vw_train_options'):
+            vw_args = vw_args + ' ' + config.get('vw_train_options')
+        else:
+            config['vw_train_options'] = cleanup_vw_train_options(vw_args)
 
     vw_filename = None
 
