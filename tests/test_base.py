@@ -16,8 +16,8 @@ $ vwoptimize.py -d small_ag_news.csv --oaa 4 --metric acc --quiet --metricformat
 (0)acc = 0.38
 
 [metricformat_raw_cv]
-$ vwoptimize.py -d small_ag_news.csv --oaa 4 --metricformat raw --cv
-(0)cv vw_average_loss = [0.2, 0.4, 0.6, 0.4, 0.4, 0.4, 0.6, 0.6, 0.8, 0.4]
+$ vwoptimize.py -d small_ag_news.csv --oaa 4 --metricformat raw --kfold 10
+(0)10-fold vw_average_loss = [0.2, 0.4, 0.6, 0.4, 0.4, 0.4, 0.6, 0.6, 0.8, 0.4]
 
 [normal_run_write_model]
 $ vwoptimize.py -d small_ag_news.csv --oaa 4 -b 20 --writeconfig tmp_config -f tmp_model --quiet --morelogs --tmpid hello
@@ -52,16 +52,16 @@ loss     last          counter         weight    label  predict features
 average loss = 0.000000
 
 [cv]
-$ vwoptimize.py -d small_ag_news.csv --cv --oaa 4
-(0)cv vw_average_loss = 0.48
+$ vwoptimize.py -d small_ag_news.csv --oaa 4 --kfold 10
+(0)10-fold vw_average_loss = 0.48
 
 [cv_same]
-$ vwoptimize.py -d small_ag_news.csv --cv --oaa 4 --metric vw_average_loss  # this is default
-(0)cv vw_average_loss = 0.48
+$ vwoptimize.py -d small_ag_news.csv --kfold 10 --oaa 4 --metric vw_average_loss  # this is default
+(0)10-fold vw_average_loss = 0.48
 
 [cv_run_write_model]
-$ vwoptimize.py -d small_ag_news.csv --cv --ect 4 -b 21 --writeconfig tmp_config1 -f tmp_model1 --quiet --morelogs --tmpid hello
-(0)cv vw_average_loss = 0.46
+$ vwoptimize.py -d small_ag_news.csv --kfold 10 --ect 4 -b 21 --writeconfig tmp_config1 -f tmp_model1 --quiet --morelogs --tmpid hello
+(0)10-fold vw_average_loss = 0.46
 write config = tmp_config1
 + vw -d .vwoptimize/hello.1.vw -f tmp_model1.tmp --ect 4 -b 21 --quiet
 
@@ -79,55 +79,55 @@ loss     last          counter         weight    label  predict features
 average loss = 0.000000
 
 [cv_ect_b20]
-$ vwoptimize.py -d small_ag_news.csv  --cv --oaa 4 -b 20
-(0)cv vw_average_loss = 0.5
+$ vwoptimize.py -d small_ag_news.csv --kfold 10 --oaa 4 -b 20
+(0)10-fold vw_average_loss = 0.5
 
 [cv_metric_acc]
-$ vwoptimize.py -d small_ag_news.csv  --cv --oaa 4 --metric acc
-(0)cv acc = 0.52
+$ vwoptimize.py -d small_ag_news.csv --kfold 10 --oaa 4 --metric acc
+(0)10-fold acc = 0.52
 
 [cv_metric_acc_num_features]
-$ vwoptimize.py -d small_ag_news.csv  --cv --oaa 4 --metric acc,num_features
-(0)cv acc = 0.52
-cv num_features = 4103.2
+$ vwoptimize.py -d small_ag_news.csv --kfold 10 --oaa 4 --metric acc,num_features
+(0)10-fold acc = 0.52
+10-fold num_features = 4103.2
 
 [cv_metric_acc_num_features_vw_average_loss]
-$ vwoptimize.py -d small_ag_news.csv  --cv --oaa 4 --metric acc,num_features,vw_average_loss
-(0)cv acc = 0.52
-cv vw_average_loss = 0.48
-cv num_features = 4103.2
+$ vwoptimize.py -d small_ag_news.csv  --kfold 10 --oaa 4 --metric acc,num_features,vw_average_loss
+(0)10-fold acc = 0.52
+10-fold vw_average_loss = 0.48
+10-fold num_features = 4103.2
 
 [cv_with_passes_and_cache_agnews_csv]
-$ vwoptimize.py -d small_ag_news.csv  --cv --oaa 4 --metric acc,num_features,vw_average_loss,vw_train_passes_used --passes 10 -c -k
-(0)cv acc = 0.52
-cv vw_average_loss = 0.48
-cv vw_train_passes_used = 4.2
-cv num_features = 3791.2
+$ vwoptimize.py -d small_ag_news.csv  --kfold 10 --oaa 4 --metric acc,num_features,vw_average_loss,vw_train_passes_used --passes 10 -c -k
+(0)10-fold acc = 0.52
+10-fold vw_average_loss = 0.48
+10-fold vw_train_passes_used = 4.2
+10-fold num_features = 3791.2
 
 [cv_with_passes_and_cache_iris_vw]
-$ vwoptimize.py -d iris.vw --cv --oaa 3 --metric acc,num_features,vw_average_loss,vw_train_passes_used --passes 10 -c -k
-(0)cv acc = 0.68
-cv vw_average_loss = 0.32
-cv vw_train_passes_used = 7.4
-cv num_features = 15
+$ vwoptimize.py -d iris.vw --kfold 10 --oaa 3 --metric acc,num_features,vw_average_loss,vw_train_passes_used --passes 10 -c -k
+(0)10-fold acc = 0.68
+10-fold vw_average_loss = 0.32
+10-fold vw_train_passes_used = 7.4
+10-fold num_features = 15
 
 [cv_bad_metrics_multiclass_mse]
-$ vwoptimize.py -d small_ag_news.csv --cv --oaa 4 --metric mse
-(0)cv mse = 1.22
+$ vwoptimize.py -d small_ag_news.csv --kfold 10 --oaa 4 --metric mse
+(0)10-fold mse = 1.22
 
 [cv_bad_metrics]
-$ vwoptimize.py -d small_ag_news.csv --cv --oaa 4 --metric brier,auc,acc,vw_average_loss
-(0)cv brier = ValueError: Cannot calculate on multiclass
-cv auc = ValueError: multiclass format is not supported
-cv acc = 0.52
-cv vw_average_loss = 0.48
+$ vwoptimize.py -d small_ag_news.csv --kfold 10 --oaa 4 --metric brier,auc,acc,vw_average_loss
+(0)10-fold brier = ValueError: Cannot calculate on multiclass
+10-fold auc = ValueError: multiclass format is not supported
+10-fold acc = 0.52
+10-fold vw_average_loss = 0.48
 
 [cache_file_err1]
-$ vwoptimize.py -d small_ag_news.csv --oaa 4 --passes 2 --cv --metric vw_train_passes_used
+$ vwoptimize.py -d small_ag_news.csv --oaa 4 --passes 2 --kfold 10 --metric vw_train_passes_used
 (1)vw failed: Error: need a cache file for multiple passes : try using --cache_file
 
 [cache_file_err2]
-$ vwoptimize.py -d small_ag_news.csv --oaa 4 --passes 2 --cv --metric vw_train_passes_used --cache_file tmp.cache
+$ vwoptimize.py -d small_ag_news.csv --oaa 4 --passes 2 --kfold 10 --metric vw_train_passes_used --cache_file tmp.cache
 (1)Dont provide --cache_file, one will be added automatically.
 
 A few tests for --report:
@@ -199,34 +199,34 @@ welcome | Hello World!
 bye | Goodbye World.
 welcome | hello
 
-[nfolds_25]
-$ vwoptimize.py -d iris.vw --metric vw_train_weighted_example_sum,vw_average_loss --oaa 3 --cv --nfolds 25
-(0)cv vw_train_weighted_example_sum = 144
-cv vw_average_loss = 0.333333
+[kfold25]
+$ vwoptimize.py -d iris.vw --metric vw_train_weighted_example_sum,vw_average_loss --oaa 3 --kfold 25
+(0)25-fold vw_train_weighted_example_sum = 144
+25-fold vw_average_loss = 0.333333
 
-[nfolds_2]
-$ vwoptimize.py -d iris.vw --metric vw_train_weighted_example_sum,vw_average_loss --oaa 3 --cv --nfolds 2
-(0)cv vw_train_weighted_example_sum = 75
-cv vw_average_loss = 0.32
+[kfold2]
+$ vwoptimize.py -d iris.vw --metric vw_train_weighted_example_sum,vw_average_loss --oaa 3 --kfold 2
+(0)2-fold vw_train_weighted_example_sum = 75
+2-fold vw_average_loss = 0.32
 
-[nfolds_extreme]
-$ head -n 50 iris.vw | vwoptimize.py --metric vw_train_weighted_example_sum,vw_average_loss --oaa 3 --cv --nfolds 50
-(0)cv vw_train_weighted_example_sum = 49
-cv vw_average_loss = 0.24
+[kfold_extreme]
+$ head -n 50 iris.vw | vwoptimize.py --metric vw_train_weighted_example_sum,vw_average_loss --oaa 3 --kfold 50
+(0)50-fold vw_train_weighted_example_sum = 49
+50-fold vw_average_loss = 0.24
 
-[nfolds_extreme2]
-$ head -n 50 iris.vw | vwoptimize.py --metric vw_train_weighted_example_sum,vw_average_loss --oaa 3 --cv --nfolds 49
-(0)cv vw_train_weighted_example_sum = 48.9796
-cv vw_average_loss = 0.234694
+[kfold_extreme2]
+$ head -n 50 iris.vw | vwoptimize.py --metric vw_train_weighted_example_sum,vw_average_loss --oaa 3 --kfold 49
+(0)49-fold vw_train_weighted_example_sum = 48.9796
+49-fold vw_average_loss = 0.234694
 
-[nfolds_too_many]
-$ head -n 50 iris.vw | vwoptimize.py --metric vw_train_weighted_example_sum,vw_average_loss --oaa 3 --cv --nfolds 51
-(0)cv vw_train_weighted_example_sum = 49.0196
-cv vw_average_loss = nan
+[kfold_too_many]
+$ head -n 50 iris.vw | vwoptimize.py --metric vw_train_weighted_example_sum,vw_average_loss --oaa 3 --kfold 51
+(0)51-fold vw_train_weighted_example_sum = 49.0196
+51-fold vw_average_loss = nan
 
 [cv_predictions_stdout]
-$ head -n 10 iris.vw | vwoptimize.py --cv --oaa 3 -p /dev/stdout
-(0)cv vw_average_loss = 0.6
+$ head -n 10 iris.vw | vwoptimize.py --kfold 10 --oaa 3 -p /dev/stdout
+(0)10-fold vw_average_loss = 0.6
 3
 1
 1
@@ -239,8 +239,8 @@ $ head -n 10 iris.vw | vwoptimize.py --cv --oaa 3 -p /dev/stdout
 2
 
 [cv_predictions1]
-$ head -n 10 iris.vw | vwoptimize.py --cv --oaa 3 -p tmp_iris_vw_10_predictions -r tmp_iris_vw_10_raw -f tmp_model_after_cv --readable_model tmp_readable_model_after_cv --quiet
-(0)cv vw_average_loss = 0.6
+$ head -n 10 iris.vw | vwoptimize.py --kfold 10 --oaa 3 -p tmp_iris_vw_10_predictions -r tmp_iris_vw_10_raw -f tmp_model_after_cv --readable_model tmp_readable_model_after_cv --quiet
+(0)10-fold vw_average_loss = 0.6
 
 [cv_predictions2]
 $ cat tmp_iris_vw_10_predictions
@@ -284,54 +284,57 @@ $ diff -u tmp_readable_model tmp_readable_model_after_cv
 $ printf '1 | hello\\n-1 | world' | vw 2>&1 | grep 'average loss'
 average loss = 1.285535
 
-[nfolds1]
-$ printf '1 | hello\\n-1 | world' | vwoptimize.py --nfolds 1 -p /dev/stdout
-(0)cv vw_train_average_loss = 1.28554
+[progressive_validation]
+$ printf '1 | hello\\n-1 | world' | vwoptimize.py -p /dev/stdout --quiet
 0
 0.253423
 
-[nfolds1_raw]
-$ printf '1 | hello\\n-1 | world' | vwoptimize.py --nfolds 1 -r /dev/stdout --metric mse
-(0)cv mse = 1.28553
+[progressive_validation_raw_mse]
+$ printf '1 | hello\\n-1 | world' | vwoptimize.py -r /dev/stdout --metric mse --quiet
+(0)mse = 1.28553
 0
 0.253423
 
-[nfolds2]
-$ printf '1 | hello\\n-1 | world' | vwoptimize.py --nfolds 2 -p /dev/stdout
-(0)cv vw_average_loss = 1.57107
+[kfold2]
+$ printf '1 | hello\\n-1 | world' | vwoptimize.py --kfold 2 -p /dev/stdout
+(0)2-fold vw_average_loss = 1.57107
 -0.253423
 0.253423
 
-[nfolds2_raw]
-$ printf '1 | hello\\n-1 | world' | vwoptimize.py --nfolds 2 -r /dev/stdout --metric mse
-(0)cv mse = 1.57107
+[kfold2_raw]
+$ printf '1 | hello\\n-1 | world' | vwoptimize.py --kfold 2 -r /dev/stdout --metric mse
+(0)2-fold mse = 1.57107
 -0.253423
 0.253423
 
-[nfolds3]
-$ printf '1 | hello\\n-1 | world' | vwoptimize.py --nfolds 3
-(0)cv vw_average_loss = nan
+[kfold3]
+$ printf '1 | hello\\n-1 | world' | vwoptimize.py --kfold 3
+(0)3-fold vw_average_loss = nan
 
-[holdout_validation_nfolds2]
-$ vwoptimize.py -d iris.vw --nfolds 2 --passes 2 -c -k --metric vw_train_average_loss,vw_average_loss
-(0)cv vw_train_average_loss = 0.165788 h
-cv vw_average_loss = 0.0690075
+[kfold2_with_holdout]
+$ vwoptimize.py -d iris.vw --kfold 2 --passes 2 -c -k --metric vw_train_average_loss,vw_average_loss
+(0)2-fold vw_train_average_loss = 0.165788 h
+2-fold vw_average_loss = 0.0690075
 
-[holdout_validation_nfolds1]
-$ vwoptimize.py -d iris.vw --nfolds 1 --passes 2 -c -k
-(0)cv vw_train_average_loss = 0.116409 h
+[kfold2_without_holdout]
+$ vwoptimize.py -d iris.vw --kfold 2 --passes 2 -c -k --metric vw_train_average_loss,vw_average_loss --holdout_off
+(0)2-fold vw_train_average_loss = 0.192494
+2-fold vw_average_loss = 0.067851
 
-[nfolds1_tags]
-$ vwoptimize.py -d tags.vw --nfolds 1 -p /dev/stdout
-(0)cv vw_train_average_loss = 1.28554
+[tags]
+$ vwoptimize.py -d tags.vw -p /dev/stdout --quiet
 0 tag1
 0.253423 tag2
 
-[nfolds2_tags]
-$ vwoptimize.py -d tags.vw --nfolds 2 -p /dev/stdout
-(0)cv vw_average_loss = 1.57107
+[tags_kfold2]
+$ vwoptimize.py -d tags.vw --kfold 2 -p /dev/stdout
+(0)2-fold vw_average_loss = 1.57107
 -0.253423 tag1
 0.253423 tag2
+
+[kfold1_error]
+$ vwoptimize.py -d tags.vw -p /dev/stdout --kfold 1
+(1)kfold parameter must > 1
 
 [cleanup]
 $ ls .vwoptimize

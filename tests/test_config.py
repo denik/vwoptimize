@@ -5,24 +5,28 @@ $ vwoptimize.py -d small_ag_news.csv --oaa 4 --quiet -f tmp.model --writeconfig 
 "vw_train_options": "--oaa 4"
 
 [vw_train_options_saved_cv]
-$ vwoptimize.py -d small_ag_news.csv --oaa 4 -b 15 --quiet -f tmp.model --writeconfig tmp.config --cv && grep vw_train_options tmp.config
-(0)cv vw_average_loss = 0.52
+$ vwoptimize.py -d small_ag_news.csv --oaa 4 -b 15 --quiet -f tmp.model --writeconfig tmp.config --kfold 10 && grep vw_train_options tmp.config
+(0)10-fold vw_average_loss = 0.52
 "vw_train_options": "--oaa 4 -b 15"
 
-[vw_train_options_saved_cv_1fold]
-$ vwoptimize.py -d small_ag_news.csv --oaa 4 -b 14 --quiet -f tmp.model --writeconfig tmp.config --nfolds 1 && grep vw_train_options tmp.config
-(0)cv vw_train_average_loss = 0.64
-"vw_train_options": "--oaa 4 -b 14"
-
 [vw_train_options_saved_tuning]
-$ vwoptimize.py -d small_ag_news.csv --oaa 4 -b 10/16? --quiet -f tmp.model --writeconfig tmp.config --cv && grep vw_train_options tmp.config
+$ vwoptimize.py -d small_ag_news.csv --oaa 4 -b 10/16? --quiet -f tmp.model --writeconfig tmp.config && grep vw_train_options tmp.config
+(0)Result vw --oaa 4 --quiet -b 10... vw_average_loss=0.7400
+Result vw --oaa 4 --quiet -b 16... vw_average_loss=0.6200*
+Best vw_average_loss with 'no preprocessing' = 0.6200*
+Best preprocessor options = <none>
+Best vw options = --oaa 4 --quiet -b 16
+Best vw_average_loss = 0.6200
+"vw_train_options": "--oaa 4 -b 16"
+
+[vw_train_options_saved_tuning_kfold]
+$ vwoptimize.py -d small_ag_news.csv --oaa 4 -b 10/16? --quiet -f tmp.model --writeconfig tmp.config --kfold 10 && grep vw_train_options tmp.config
 (0)Result vw --oaa 4 --quiet -b 10... vw_average_loss=0.6400
 Result vw --oaa 4 --quiet -b 16... vw_average_loss=0.5200*
 Best vw_average_loss with 'no preprocessing' = 0.5200*
 Best preprocessor options = <none>
 Best vw options = --oaa 4 --quiet -b 16
 Best vw_average_loss = 0.5200
-cv vw_average_loss = 0.52
 "vw_train_options": "--oaa 4 -b 16"
 
 [load_regressor_test]

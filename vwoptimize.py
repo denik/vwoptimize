@@ -31,10 +31,10 @@ VOWPAL_WABBIT_ERRORS = "error|won't work right|errno|can't open|vw::vw_exception
 DEFAULT_COLUMNSPEC = 'y,text,*'
 METRIC_FORMAT = 'mean'
 
-AWK_TRAINSET = "awk '(NR - $fold) % NFOLDS != 0' VW |"
-AWK_TESTSET = "awk '(NR - $fold) % NFOLDS == 0' VW |"
-PERL_TRAINSET = "perl -nE 'if ((++$NR - $fold) % NFOLDS != 0) { print $_ }' VW |"
-PERL_TESTSET = "perl -nE 'if ((++$NR - $fold) % NFOLDS == 0) { print $_ }' VW |"
+AWK_TRAINSET = "awk '(NR - $fold) % KFOLDS != 0' VW |"
+AWK_TESTSET = "awk '(NR - $fold) % KFOLDS == 0' VW |"
+PERL_TRAINSET = "perl -nE 'if ((++$NR - $fold) % KFOLDS != 0) { print $_ }' VW |"
+PERL_TESTSET = "perl -nE 'if ((++$NR - $fold) % KFOLDS == 0) { print $_ }' VW |"
 
 if 'darwin' in sys.platform:
     # awk is slow on Mac OS X
@@ -573,7 +573,7 @@ def get_vw_command(
 
 def vw_cross_validation(
         vw_filename,
-        nfolds,
+        kfold,
         vw_args,
         workers=None,
         with_predictions=False,
@@ -602,10 +602,12 @@ def vw_cross_validation(
     # 4 -> 1
     # and so on
 
-    if nfolds == 1:
+    if kfold is None:
         trainset = vw_filename
         testset = None
+        kfold = 1
     else:
+        assert kfold > 1, kfold
         if FOLDSCRIPT == 'awk':
             trainset = AWK_TRAINSET
             testset = AWK_TESTSET
@@ -615,8 +617,8 @@ def vw_cross_validation(
         else:
             raise AssertionError('foldscript=%r not understood' % FOLDSCRIPT)
 
-        trainset = trainset.replace('NFOLDS', str(nfolds)).replace('VW', vw_filename)
-        testset = testset.replace('NFOLDS', str(nfolds)).replace('VW', vw_filename)
+        trainset = trainset.replace('KFOLDS', str(kfold)).replace('VW', vw_filename)
+        testset = testset.replace('KFOLDS', str(kfold)).replace('VW', vw_filename)
 
     model_filename = get_temp_filename('model') + '.$fold'
 
@@ -646,7 +648,7 @@ def vw_cross_validation(
         raw_predictions=None if testset else r_filename,
         feature_mask_retrain=feature_mask_retrain,
         readable_model=readable_model,
-        name='train')
+        name='train' if testset else 'test')
 
     for item in base_training_command:
         if capture_output is True or item['name'] in capture_output:
@@ -677,7 +679,7 @@ def vw_cross_validation(
 
     commands = []
 
-    for this_fold in xrange(1, nfolds + 1):
+    for this_fold in xrange(1, kfold + 1):
         this_fold = str(this_fold)
         training_command = deque([x.copy() for x in base_training_command])
         for cmd in training_command:
@@ -1080,7 +1082,7 @@ def get_tuning_config(config):
     return type(**params)
 
 
-def vw_optimize_over_cv(vw_filename, nfolds, args, metric, config,
+def vw_optimize_over_cv(vw_filename, kfold, args, metric, config,
                         workers=None, other_metrics=[],
                         feature_mask_retrain=False, show_num_features=False):
     # we only depend on scipy if parameter tuning is enabled
@@ -1131,7 +1133,7 @@ def vw_optimize_over_cv(vw_filename, nfolds, args, metric, config,
         try:
             y_pred_txt, raw_pred_txt, num_features, outputs = vw_cross_validation(
                 vw_filename,
-                nfolds,
+                kfold,
                 args,
                 workers=workers,
                 with_predictions=bool(calculated_metrics),
@@ -1792,7 +1794,7 @@ def calculate_score(metric, y_true, y_pred, config):
         raise ValueError('Unknown metric: %r' % metric)
 
 
-def main_tune(metric, config, filename, format, args, preprocessor_base, nfolds, ignoreheader, workers, feature_mask_retrain, show_num_features):
+def main_tune(metric, config, filename, format, args, preprocessor_base, kfold, ignoreheader, workers, feature_mask_retrain, show_num_features):
     if preprocessor_base is None:
         preprocessor_base = []
     else:
@@ -1851,7 +1853,7 @@ def main_tune(metric, config, filename, format, args, preprocessor_base, nfolds,
 
         this_best_result, this_best_options = vw_optimize_over_cv(
             vw_filename,
-            nfolds,
+            kfold,
             vw_args,
             optimization_metric,
             config,
@@ -2054,9 +2056,8 @@ def main(to_cleanup):
     parser = PassThroughOptionParser()
 
     # cross-validation and parameter tuning options
-    parser.add_option('--cv', action='store_true')
+    parser.add_option('--kfold', type=int)
     parser.add_option('--workers', type=int)
-    parser.add_option('--nfolds')
     parser.add_option('--metric', action='append')
     parser.add_option('--metricformat')
 
@@ -2127,12 +2128,8 @@ def main(to_cleanup):
         parseaudit(sys.stdin)
         sys.exit(0)
 
-    if options.nfolds is not None:
-        options.nfolds = int(options.nfolds)
-        options.cv = True
-
-    if options.nfolds is None:
-        options.nfolds = 10
+    if options.kfold is not None and options.kfold <= 1:
+        sys.exit('kfold parameter must > 1')
 
     if options.feature_mask_retrain_args:
         options.feature_mask_retrain = options.feature_mask_retrain_args
@@ -2232,14 +2229,7 @@ def main(to_cleanup):
             need_tuning = 1
             break
 
-    options.metric = _make_proper_list(options.metric)
-
-    if not options.metric:
-        if options.nfolds == 1:
-            options.metric = ['vw_train_average_loss']
-        else:
-            options.metric = ['vw_average_loss']
-
+    options.metric = _make_proper_list(options.metric) or ['vw_average_loss']
     show_num_features = 'num_features' in options.metric
     options.metric = [x for x in options.metric if 'num_features' != x]
 
@@ -2252,7 +2242,7 @@ def main(to_cleanup):
 
     y_true = None
 
-    if calculated_metrics or options.cv or need_tuning or options.feature_mask_retrain is not None or options.toperrors:
+    if calculated_metrics or options.kfold or need_tuning or options.feature_mask_retrain is not None or options.toperrors:
         # cannot work with stdin, write it to a temp file
         if filename is None:
             filename = get_temp_filename(format)
@@ -2333,7 +2323,7 @@ def main(to_cleanup):
             format=format,
             args=args,
             preprocessor_base=preprocessor,
-            nfolds=options.nfolds,
+            kfold=options.kfold,
             ignoreheader=options.ignoreheader,
             workers=options.workers,
             feature_mask_retrain=options.feature_mask_retrain,
@@ -2370,7 +2360,7 @@ def main(to_cleanup):
                 ignoreheader=options.ignoreheader,
                 workers=options.workers)
 
-    if options.cv:
+    if options.kfold and not need_tuning:
         # QQQ --initial_regressor is not passed there
         # XXX we could skip --cv here if we make main_tune() keep final predictions and raw_predictions for us
 
@@ -2378,7 +2368,7 @@ def main(to_cleanup):
 
         cv_pred_txt, raw_cv_pred_txt, num_features, outputs = vw_cross_validation(
             vw_filename,
-            options.nfolds,
+            options.kfold,
             vw_args,
             workers=options.workers,
             with_predictions=bool(calculated_metrics) or options.predictions or options.toperrors,
@@ -2392,10 +2382,10 @@ def main(to_cleanup):
         for metric in options.metric:
             value = calculate_or_extract_score(metric, y_true, cv_pred, config, outputs)
             if value is not None:
-                log_always('cv %s = %s', metric, _frmt_score(value))
+                log_always('%s-fold %s = %s', options.kfold, metric, _frmt_score(value))
 
         if show_num_features and num_features:
-            log_always('cv num_features = %s', _frmt_score(num_features))
+            log_always('%s-fold num_features = %s', options.kfold, _frmt_score(num_features))
 
         if options.predictions:
             write_file(options.predictions, cv_pred_txt)
@@ -2435,7 +2425,7 @@ def main(to_cleanup):
         final_regressor_tmp = final_regressor + '.tmp'
         to_cleanup.append(final_regressor_tmp)
 
-    if final_regressor_tmp or not (options.cv or need_tuning):
+    if final_regressor_tmp or not (options.kfold or need_tuning):
         my_args = vw_args
 
         predictions_fname = options.predictions
