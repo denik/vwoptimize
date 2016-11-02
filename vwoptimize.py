@@ -2099,7 +2099,6 @@ def main(to_cleanup):
     parser.add_option('--morelogs', action='count', default=0)
     parser.add_option('--lesslogs', action='count', default=0)
     parser.add_option('--keeptmp', action='store_true')
-    parser.add_option('--savefeatures')
     parser.add_option('--parseaudit', action='store_true')
     parser.add_option('--linemode', action='store_true')
 
@@ -2253,7 +2252,7 @@ def main(to_cleanup):
 
     y_true = None
 
-    if calculated_metrics or options.cv or need_tuning or options.savefeatures or options.feature_mask_retrain is not None or options.toperrors:
+    if calculated_metrics or options.cv or need_tuning or options.feature_mask_retrain is not None or options.toperrors:
         # cannot work with stdin, write it to a temp file
         if filename is None:
             filename = get_temp_filename(format)
@@ -2431,9 +2430,6 @@ def main(to_cleanup):
         output_fobj.write('\n')
         output_fobj.close()
 
-    if not final_regressor and options.savefeatures:
-        final_regressor = get_temp_filename('final_regressor')
-
     final_regressor_tmp = None
     if final_regressor:
         final_regressor_tmp = final_regressor + '.tmp'
@@ -2516,20 +2512,6 @@ def main(to_cleanup):
 
     if config_tmp_filename:
         os.rename(config_tmp_filename, options.writeconfig)
-
-    if options.savefeatures:
-        vw_cmd = VW_CMD
-
-        assert vw_filename
-        vw_cmd += ' -d %s' % (vw_filename, )
-
-        regressor = final_regressor or options.initial_regressor
-
-        assert regressor
-        vw_cmd += ' -i %s -t -a' % regressor
-        to_cleanup.append(options.savefeatures + '.tmp')
-        system(vw_cmd + ' | %s %s --parseaudit > %s.tmp' % (sys.executable, __file__, options.savefeatures))
-        os.rename(options.savefeatures + '.tmp', options.savefeatures)
 
     unlink(*to_cleanup)
 
