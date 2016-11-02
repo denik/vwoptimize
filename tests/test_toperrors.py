@@ -42,6 +42,10 @@ $ vwoptimize.py -d small_ag_news_binary.csv --strip_punct --lowercase --quiet --
 [toperrors_train_int_1]
 $ vwoptimize.py -d small_ag_news_binary.csv --strip_punct --lowercase --quiet --toperrors 1
 -0.327153,1,Clearing Out Fannie #39;s  #39;Phantoms #39;,Score one for the lion tamer. The federal regulator that oversees home-mortgage giant Fannie Mae finally persuaded that government-sponsored enterprise to agree to clean up its questionable accounting practices.
+
+[cleanup]
+$ ls .vwoptimize
+<BLANKLINE>
 """
 
 import sys
