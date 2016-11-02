@@ -38,7 +38,7 @@ acc = 1
 
 [load_train_options]
 $ vwoptimize.py -d small_ag_news.csv --readconfig tmp.config --metric acc --initial_regressor '' --tmpid x 2>&1 | egrep '\+|test|loss =|acc ='
-+ vw -d .vwoptimize/x.1.vw --oaa 4 -b 16 -p .vwoptimize/x.3.pred
++ vw -d .vwoptimize/x.1.vw -p .vwoptimize/x.3.pred --oaa 4 -b 16
 average loss = 0.620000
 acc = 0.56
 """

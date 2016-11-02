@@ -45,7 +45,7 @@ $ vwoptimize.py -d small_ag_news.csv --oaa 4 -b 15 --writeconfig tmp_config -f t
 
 [feature_mask_retrain_read_model_t]
 $ vwoptimize.py -d small_ag_news.csv --readconfig tmp_config --tmpid hey -t 2>&1 | egrep '\+|bits|loss|only'
-+ vw -d .vwoptimize/hey.1.vw -t -i tmp_model
++ vw -d .vwoptimize/hey.1.vw -i tmp_model -t
 only testing
 Num weight bits = 15
 loss     last          counter         weight    label  predict features

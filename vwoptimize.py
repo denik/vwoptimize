@@ -451,36 +451,51 @@ def _as_dict(lst, name):
     return {'args': lst, 'shell': True, 'name': name}
 
 
-def get_vw_command(to_cleanup, trainset, model_filename, vw_args, feature_mask_retrain=None, readable_model=None, name=''):
+def get_vw_command(
+        to_cleanup,
+        source,
+        vw_args='',
+        initial_regressor=None,
+        final_regressor=None,
+        predictions=None,
+        raw_predictions=None,
+        audit=False,
+        feature_mask_retrain=None,
+        readable_model=None,
+        only_test=False,
+        name=''):
     data_filename = ''
     data_pipeline = ''
 
-    if trainset is None:
+    if source is None:
         pass
-    elif isinstance(trainset, basestring):
-        if '|' in trainset:
-            data_pipeline = trainset
+    elif isinstance(source, basestring):
+        if '|' in source:
+            data_pipeline = source
             if not data_pipeline.strip().endswith('|'):
                 data_pipeline += ' |'
         else:
-            assert os.path.exists(trainset), trainset
-            data_filename = '-d %s' % trainset
-    elif isinstance(trainset, list):
-        assert trainset and os.path.exists(trainset[0]), trainset
-        data_pipeline = 'cat %s |' % ' '.join(quote(x) for x in trainset)
+            assert os.path.exists(source), source
+            data_filename = '-d %s' % source
+    elif isinstance(source, list):
+        assert source and os.path.exists(source[0]), source
+        data_pipeline = 'cat %s |' % ' '.join(quote(x) for x in source)
     else:
-        raise TypeError('Expected string or list, not %r' % (trainset, ))
+        raise TypeError('Expected string or list, not %r' % (source, ))
 
     if feature_mask_retrain:
-        if model_filename:
-            intermediate_model_filename = model_filename + '.feature_mask'
+        if final_regressor:
+            intermediate_model_filename = final_regressor + '.feature_mask'
         else:
             intermediate_model_filename = get_temp_filename('feature_mask')
         to_cleanup.append(intermediate_model_filename)
     else:
-        intermediate_model_filename = model_filename
+        intermediate_model_filename = final_regressor
 
     final_options = []
+
+    if audit:
+        final_options += ['-a']
 
     if readable_model:
         final_options += ['--readable_model', readable_model]
@@ -493,8 +508,8 @@ def get_vw_command(to_cleanup, trainset, model_filename, vw_args, feature_mask_r
     if '-c' in vw_args or '--cache_file' in vw_args:
         remove_option(vw_args, '-c', 0)
         remove_option(vw_args, '--cache_file', 1)
-        if model_filename:
-            cache_file = model_filename + '.cache'
+        if final_regressor:
+            cache_file = final_regressor + '.cache'
         else:
             cache_file = get_temp_filename('cache')
         vw_args.extend(['--cache_file', cache_file])
@@ -504,8 +519,19 @@ def get_vw_command(to_cleanup, trainset, model_filename, vw_args, feature_mask_r
         data_pipeline,
         VW_CMD,
         data_filename,
-        '-f %s' % intermediate_model_filename if intermediate_model_filename else ''
+        '-i %s' % initial_regressor if initial_regressor else '',
+        '-f %s' % intermediate_model_filename if intermediate_model_filename else '',
+
+        # In case of --feature_mask_retrain, we must decide whether to output predictions from first or second vw
+        # command. Since predictions of the second one will probably overfit, using the first one.
+        '-p %s' % predictions if predictions else '',
+        '-r %s' % raw_predictions if raw_predictions else '',
+
+        '-t' if only_test else '',
     ] + vw_args
+
+    if only_test:
+        return _as_dict(training_command + final_options, name=name)
 
     if not feature_mask_retrain:
         return deque([_as_dict(training_command + final_options, name=name)])
@@ -525,7 +551,7 @@ def get_vw_command(to_cleanup, trainset, model_filename, vw_args, feature_mask_r
     if '-c' in feature_mask_retrain or '--cache_file' in feature_mask_retrain:
         remove_option(feature_mask_retrain, '-c', 0)
         remove_option(feature_mask_retrain, '--cache_file', 0)
-        cache_file = model_filename + '.cache'
+        cache_file = final_regressor + '.cache'
         feature_mask_retrain.extend(['--cache_file', cache_file])
         to_cleanup.append(cache_file)
 
@@ -536,7 +562,7 @@ def get_vw_command(to_cleanup, trainset, model_filename, vw_args, feature_mask_r
             VW_CMD,
             data_filename,
             '--quiet' if '--quiet' in vw_args else '',
-            '-f %s' % model_filename if model_filename else '',
+            '-f %s' % final_regressor if final_regressor else '',
             '--feature_mask %s' % intermediate_model_filename,
             '-i %s' % intermediate_model_filename] + feature_mask_retrain + final_options, name=name + "2"),
     ])
@@ -593,17 +619,13 @@ def vw_cross_validation(
 
     if with_predictions:
         p_filename = '%s.predictions' % model_filename
-        with_p = '-p %s' % p_filename
     else:
         p_filename = None
-        with_p = ''
 
     if with_raw_predictions:
         r_filename = '%s.raw' % model_filename
-        with_r = '-r %s' % r_filename
     else:
         r_filename = None
-        with_r = ''
 
     if calc_num_features:
         readable_model = model_filename + '.readable'
@@ -615,8 +637,10 @@ def vw_cross_validation(
     base_training_command = get_vw_command(
         cleanup_tmpl,
         trainset,
-        model_filename,
-        vw_args,
+        vw_args=vw_args,
+        final_regressor=model_filename,
+        predictions=None if testset else p_filename,
+        raw_predictions=None if testset else r_filename,
         feature_mask_retrain=feature_mask_retrain,
         readable_model=readable_model,
         name='train')
@@ -628,24 +652,25 @@ def vw_cross_validation(
             item['args'] += ' --quiet'
 
     if testset:
-        testing_command = '%s %s -t -i %s %s %s' % (testset, VW_CMD, model_filename, with_p, with_r)
-        testing_command = {'args': testing_command, 'name': 'test'}
+        testing_command = get_vw_command(
+            cleanup_tmpl,
+            testset,
+            initial_regressor=model_filename,
+            predictions=p_filename,
+            raw_predictions=r_filename,
+            only_test=True,
+            name='test')
 
+        # XXX this also can be moved inside
         if capture_output is True or 'test' in capture_output:
             testing_command['stderr'] = subprocess.PIPE
         else:
             testing_command['args'] += ' --quiet'
 
         base_training_command.append(testing_command)
-    else:
-        if with_p:
-            base_training_command[-1]['args'] += ' ' + with_p
-
-        if with_r:
-            base_training_command[-1]['args'] += ' ' + with_r
 
     for item in base_training_command:
-        log("+ %s", item)
+        log("+ %s", item['args'])
 
     commands = []
 
@@ -2412,24 +2437,12 @@ def main(to_cleanup):
     if final_regressor_tmp or not (options.cv or need_tuning):
         my_args = vw_args
 
-        if options.initial_regressor:
-            my_args += ' -i %s' % options.initial_regressor
-
         predictions_fname = options.predictions
 
         if calculated_metrics or options.toperrors:
             if not predictions_fname or predictions_fname in STDOUT_NAMES:
                 predictions_fname = get_temp_filename('pred')
                 to_cleanup.append(predictions_fname)
-
-        if predictions_fname:
-            my_args += ' -p %s' % predictions_fname
-
-        if options.raw_predictions:
-            my_args += ' -r %s' % options.raw_predictions
-
-        if options.audit:
-            my_args += ' -a'
 
         if options.readable_model:
             readable_model = options.readable_model
@@ -2442,8 +2455,12 @@ def main(to_cleanup):
         vw_cmd = get_vw_command(
             to_cleanup,
             vw_filename,
-            final_regressor_tmp,
             my_args,
+            initial_regressor=options.initial_regressor,
+            final_regressor=final_regressor_tmp,
+            predictions=predictions_fname,
+            raw_predictions=options.raw_predictions,
+            audit=options.audit,
             feature_mask_retrain=options.feature_mask_retrain,
             readable_model=readable_model)
 
