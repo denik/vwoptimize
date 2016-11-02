@@ -176,9 +176,12 @@ def write_file(filename, data):
         data = ''.join(data)
     else:
         assert isinstance(data, str), type(data)
-    fobj = open(filename, 'w')
-    fobj.write(data)
-    flush_and_close(fobj)
+    if filename in STDOUT_NAMES:
+        sys.stdout.write(data)
+    else:
+        fobj = open(filename, 'w')
+        fobj.write(data)
+        flush_and_close(fobj)
 
 
 def get_format_from_filename(filename):
@@ -757,6 +760,8 @@ def _load_first_float_from_each_string(file, size=None, with_text=False):
     elif hasattr(file, 'read'):
         pass
     elif isinstance(file, basestring):
+        if file in STDOUT_NAMES:
+            sys.exit('Will not read %s' % file)
         file = open(file)
     else:
         raise AssertionError(limited_repr(file))
