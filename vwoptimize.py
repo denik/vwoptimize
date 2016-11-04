@@ -705,6 +705,9 @@ def vw_cross_validation(
     try:
         success, outputs = run_subprocesses(commands, workers=workers, log_level=-1)
 
+        # check outputs first, the might be a valuable error message there
+        outputs = dict((key, [parse_vw_output(out) for out in value]) for (key, value) in outputs.items())
+
         if not success:
             vw_failed()
 
@@ -721,8 +724,6 @@ def vw_cross_validation(
             raw_predictions.extend([x for x in items if x is not None])
 
         num_features = [get_num_features(name) for name in readable_models]
-
-        outputs = dict((key, [parse_vw_output(out) for out in value]) for (key, value) in outputs.items())
 
         return predictions, raw_predictions, num_features, outputs
 
