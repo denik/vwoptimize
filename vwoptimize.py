@@ -2058,7 +2058,10 @@ def cleanup_vw_train_options(vw_args):
 
 
 def main(to_cleanup):
-    parser = PassThroughOptionParser()
+    if '--report' in sys.argv or '--parseaudit' in sys.argv or '--tovw' in sys.argv or '--tovw_simple' in sys.argv:
+        parser = optparse.OptionParser()
+    else:
+        parser = PassThroughOptionParser()
 
     # cross-validation and parameter tuning options
     parser.add_option('--kfold', type=int)
@@ -2079,6 +2082,7 @@ def main(to_cleanup):
     parser.add_option('-i', '--initial_regressor')
     parser.add_option('-d', '--data')
     parser.add_option('-a', '--audit', action='store_true')
+    parser.add_option('--named_labels')
 
     parser.add_option('--readconfig')
     parser.add_option('--writeconfig')
@@ -2164,10 +2168,10 @@ def main(to_cleanup):
         if not os.path.exists(filename):
             sys.exit('File not found: %s' % filename)
 
-    named_labels = read_argument(args, '--named_labels')
-    named_labels = _make_proper_list(named_labels, proper_label)
+    named_labels = _make_proper_list(options.named_labels, proper_label)
     if named_labels is not None:
         config['named_labels'] = named_labels
+        args += ['--named_labels', options.named_labels]
 
     weight = parse_weight(options.weight, config.get('named_labels'))
     weight_train = parse_weight(options.weight_train, config.get('named_labels')) or weight
@@ -2286,6 +2290,8 @@ def main(to_cleanup):
             config.setdefault('threshold', (min_label + max_label) / 2.0)
 
     if options.report:
+        # XXX major source of confusion when report is done on multiclass, since it tries to calculate threshold for it rather than
+        # treating it as multiclass. Perhaps refuse to calculate threshold if min_value/max_value is not 0/1 or -1/1 or if there more than 2 classes
         assert options.metric
         assert calculated_metrics
         if options.predictions in STDIN_NAMES:
