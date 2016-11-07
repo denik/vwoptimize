@@ -1834,8 +1834,9 @@ def main_tune(metric, config, filename, format, args, preprocessor_base, kfold, 
             assert isinstance(filename, basestring), filename
             vw_filename = filename
 
-            # XXX preprocessor can make sense too
-            assert not preprocessor, 'TODO'
+            if preprocessor:
+                sys.exit('Preprocessing not supported for vw format')
+
         else:
             vw_filename = get_temp_filename('vw_filename')
             to_cleanup.append(vw_filename)
