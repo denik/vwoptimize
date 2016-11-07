@@ -466,6 +466,7 @@ def get_vw_command(
         feature_mask_retrain=None,
         readable_model=None,
         only_test=False,
+        fix_cache_file=False,
         name=''):
     data_filename = ''
     data_pipeline = ''
@@ -505,18 +506,19 @@ def get_vw_command(
 
     vw_args = vw_args.split()
 
-    if '--cache_file' in vw_args:
-        sys.exit('Dont provide --cache_file, one will be added automatically.')
+    if fix_cache_file:
+        if '--cache_file' in vw_args:
+            sys.exit('Dont provide --cache_file, one will be added automatically.')
 
-    if '-c' in vw_args or '--cache_file' in vw_args:
-        remove_option(vw_args, '-c', 0)
-        remove_option(vw_args, '--cache_file', 1)
-        if final_regressor:
-            cache_file = final_regressor + '.cache'
-        else:
-            cache_file = get_temp_filename('cache')
-        vw_args.extend(['--cache_file', cache_file])
-        to_cleanup.append(cache_file)
+        if '-c' in vw_args or '--cache_file' in vw_args:
+            remove_option(vw_args, '-c', 0)
+            remove_option(vw_args, '--cache_file', 1)
+            if final_regressor:
+                cache_file = final_regressor + '.cache'
+            else:
+                cache_file = get_temp_filename('cache')
+            vw_args.extend(['--cache_file', cache_file])
+            to_cleanup.append(cache_file)
 
     training_command = [
         data_pipeline,
@@ -648,6 +650,7 @@ def vw_cross_validation(
         raw_predictions=None if testset else r_filename,
         feature_mask_retrain=feature_mask_retrain,
         readable_model=readable_model,
+        fix_cache_file=kfold > 1,
         name='train' if testset else 'test')
 
     for item in base_training_command:
@@ -664,9 +667,9 @@ def vw_cross_validation(
             predictions=p_filename,
             raw_predictions=r_filename,
             only_test=True,
+            fix_cache_file=kfold > 1,
             name='test')
 
-        # XXX this also can be moved inside
         if capture_output is True or 'test' in capture_output:
             testing_command['stderr'] = subprocess.PIPE
         else:
