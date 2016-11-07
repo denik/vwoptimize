@@ -27,7 +27,7 @@ KEEPTMP = False
 STDIN_NAMES = ('/dev/stdin', '-')
 STDOUT_NAMES = ('/dev/stdout', 'stdout')
 VW_CMD = 'vw'
-VOWPAL_WABBIT_ERRORS = "error|won't work right|errno|can't open|vw::vw_exception"
+VOWPAL_WABBIT_ERRORS = "error|won't work right|errno|can't open|vw::vw_exception|need a cache file for multiple passes"
 DEFAULT_COLUMNSPEC = 'y,text,*'
 METRIC_FORMAT = 'mean'
 
