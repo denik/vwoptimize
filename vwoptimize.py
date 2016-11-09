@@ -1919,7 +1919,6 @@ def parseaudit(source):
             weight = weight.split('@')[0]
             weight = float(weight)
             value = float(value)
-            assert value == 1, value
             if not weight:
                 continue
 
@@ -1934,11 +1933,14 @@ def parseaudit(source):
             weights[hash] = weight
             heapq.heappush(heap, (-weight, hash))
 
-    while heap:
-        w, hash = heapq.heappop(heap)
-        item = format_item(counts, -w, hash)
-        if item:
-            print item
+    try:
+        while heap:
+            w, hash = heapq.heappop(heap)
+            item = format_item(counts, -w, hash)
+            if item:
+                print item
+    except IOError, ex:
+        sys.exit(str(ex))
 
 
 def mean_h(values):

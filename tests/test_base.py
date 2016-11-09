@@ -24,6 +24,12 @@ $ vwoptimize.py -d small_ag_news.csv --oaa 4 -b 20 --writeconfig tmp_config -f t
 (0)write config = tmp_config
 + vw -d .vwoptimize/hello.1.vw -f tmp_model.tmp --oaa 4 -b 20 --quiet
 
+[parseaudit1]
+$ vwoptimize.py --quiet -i tmp_model -t -a -d small_ag_news.csv | vwoptimize.py --parseaudit | head -n 2
+(0)[Errno 32] Broken pipe
+0.0901711 his 5
+0.0761782 agreed 2
+
 [normal_run_read_model]
 $ vwoptimize.py -d small_ag_news.csv --readconfig tmp_config 2>&1 | egrep 'bits|loss|only'
 Num weight bits = 20
@@ -268,17 +274,21 @@ $ cat tmp_iris_vw_10_raw
 1:-0.301372 2:-0.31029 3:-0.208859
 1:-0.46615 2:-0.158856 3:-0.565657
 
-[cv_predictions_vw]
+[cv_predictions3_vw]
 $ head -n 10 iris.vw | vw -f tmp_vw_model --readable_model tmp_readable_model --quiet --oaa 3
 <BLANKLINE>
 
-[cv_predictions_model]
+[cv_predictions4_model]
 $ diff tmp_vw_model tmp_model_after_cv
 <BLANKLINE>
 
-[cv_predictions_readable_model]
+[cv_predictions5_readable_model]
 $ diff -u tmp_readable_model tmp_readable_model_after_cv
 <BLANKLINE>
+
+[parseaudit2]
+$ vwoptimize.py --quiet -i tmp_vw_model -t -a -d iris.vw | vwoptimize.py --parseaudit | head -n 1
+0.0811443 3 150
 
 [progressive_validation_vw]
 $ printf '1 | hello\\n-1 | world' | vw 2>&1 | grep 'average loss'
