@@ -11,7 +11,6 @@ import csv
 import re
 import subprocess
 import time
-import heapq
 import json
 import pprint
 from itertools import izip_longest
@@ -1903,40 +1902,54 @@ def format_item(counts, weight, hash, ignore_single=None):
 def parseaudit(source):
     weights = {}
     counts = {}  # hash -> text -> count
-    heap = []
     line = None
+
+    # TODO: for binary labels, count positive vs negative class
 
     while True:
         line = source.readline()
         if not line:
             break
-        line = line.rstrip()
         if not line.startswith('\t'):
             continue
+        line = line.rstrip()
 
-        for feature in set(line.strip().split()):
-            text, hash, value, weight = feature.split(':')[:4]
+        example_features = {}
+
+        for feature in line.strip().split():
+            text, hash, _value, weight = feature.split(':')[:4]
+
+            if hash in example_features:
+                # Count the feature only once. This ignores collisions within the example (which is better than counting a particular hash twice).
+                continue
+
             weight = weight.split('@')[0]
             weight = float(weight)
-            value = float(value)
+
             if not weight:
                 continue
 
-            c = counts.setdefault(hash, {})
-            c.setdefault(text, 0)
-            c[text] += 1
+            example_features[hash] = text
 
             if hash in weights:
                 assert weights.get(hash) == weight, (hash, text, weight, weights.get(hash))
                 continue
 
             weights[hash] = weight
-            heapq.heappush(heap, (-weight, hash))
+
+        for hash, feature in example_features.iteritems():
+            c = counts.get(hash)
+            if c is None:
+                counts[hash] = {feature: 1}
+            else:
+                c[feature] = c.get(feature, 0) + 1
+
+    weights = [(w, hash) for (hash, w) in weights.iteritems()]
+    weights.sort(reverse=True)
 
     try:
-        while heap:
-            w, hash = heapq.heappop(heap)
-            item = format_item(counts, -w, hash)
+        for w, hash in weights:
+            item = format_item(counts, w, hash)
             if item:
                 print item
     except IOError, ex:
