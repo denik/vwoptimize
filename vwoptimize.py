@@ -1803,6 +1803,79 @@ def calculate_score(metric, y_true, y_pred, config):
         raise ValueError('Unknown metric: %r' % metric)
 
 
+def _log_classification_report(*args, **kwargs):
+    result = classification_report(*args, **kwargs)
+    maxwidth = {}
+
+    for line in result:
+        for column, item in enumerate(line):
+            maxwidth[column] = max(maxwidth.get(column, 0), len(item))
+
+    for line in result:
+        for column, item in enumerate(line):
+            frmt = '%' + str(maxwidth[column]) + 's '
+            sys.stderr.write(frmt % item)
+        sys.stderr.write('\n')
+
+
+def log_classification_report(*args, **kwargs):
+    try:
+        _log_classification_report(*args, **kwargs)
+    except Exception, ex:
+        sys.stderr.write(str(ex) + '\n')
+
+
+def classification_report(y_true, y_pred, labels=None, sample_weight=None, digits=4, threshold=None):
+    # this function is copied from https://github.com/scikit-learn/scikit-learn/blob/412996f/sklearn/metrics/classification.py#L1341 (c) respective authors
+    # I pulled it here to fix formatting bug.
+    from sklearn.metrics import precision_recall_fscore_support, accuracy_score
+
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+
+    if labels is None:
+        from sklearn.utils.multiclass import unique_labels
+
+        if threshold is not None:
+            y_true = y_true > threshold
+            y_pred = y_pred > threshold
+
+        labels = unique_labels(y_true, y_pred)
+    else:
+        labels = np.asarray(labels)
+
+    last_line_heading = 'avg / total'
+    target_names = ['%s' % l for l in labels]
+
+    results = [["", "precision", "recall", "f1-score", "support", "accuracy"]]
+
+    p, r, f1, s = precision_recall_fscore_support(y_true, y_pred,
+                                                  labels=labels,
+                                                  average=None,
+                                                  sample_weight=sample_weight)
+
+    for i, label in enumerate(labels):
+        values = [target_names[i]]
+        for v in (p[i], r[i], f1[i]):
+            values += ["{0:0.{1}f}".format(v, digits)]
+        values += ["{0}".format(s[i])]
+        accuracy = accuracy_score(y_true == label, y_pred == label, sample_weight=sample_weight)
+        values += ["{0:0.{1}f}".format(accuracy, digits)]
+        results.append(values)
+
+    values = [last_line_heading]
+    for v in (np.average(p, weights=s),
+              np.average(r, weights=s),
+              np.average(f1, weights=s)):
+        values += ["{0:0.{1}f}".format(v, digits)]
+    values += ['{0}'.format(np.sum(s))]
+    accuracy = accuracy_score(y_true, y_pred, sample_weight=sample_weight)
+    values += ["{0:0.{1}f}".format(accuracy, digits)]
+    results.append(values)
+
+    return results
+
+
 def main_tune(metric, config, filename, format, args, preprocessor_base, kfold, ignoreheader, workers, feature_mask_retrain, show_num_features):
     if preprocessor_base is None:
         preprocessor_base = []
@@ -2126,6 +2199,7 @@ def main(to_cleanup):
     parser.add_option('--report', action='store_true')
     parser.add_option('--toperrors')
     parser.add_option('--threshold', type=float)
+    parser.add_option('--classification_report', action='store_true')
 
     # logging and debugging and misc
     parser.add_option('--morelogs', action='count', default=0)
@@ -2533,6 +2607,9 @@ def main(to_cleanup):
 
         if options.toperrors:
             print_toperrors(options.toperrors, y_true, y_pred, y_pred_text, filename=filename, format=format, ignoreheader=options.ignoreheader)
+
+        if options.classification_report:
+            log_classification_report(y_true, y_pred, labels=config.get('named_labels'), threshold=config.get('threshold'))  # XXX sample_weight
 
     if final_regressor_tmp:
         os.rename(final_regressor_tmp, final_regressor)
