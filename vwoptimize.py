@@ -758,7 +758,7 @@ def parse_vw_output(output):
     return result
 
 
-def _load_first_float_from_each_string(file, size=None, with_text=False):
+def _load_labels(file, size=None, with_text=False, named_labels=None):
     filename = file
     if isinstance(file, list):
         filename = file
@@ -779,7 +779,13 @@ def _load_first_float_from_each_string(file, size=None, with_text=False):
             text = line.strip()
             if with_text:
                 result_text.append(text)
-            result.append(float(text.split()[0]))
+            label = text.split()[0]
+            if named_labels is not None:
+                if label not in named_labels:
+                    sys.exit('Unexpected label %r from %r' % (label, filename))
+                result.append(label)
+            else:
+                result.append(float(label))
         except:
             sys.stderr.write('Error while parsing %r\nin %r\n' % (line, limited_repr(filename)))
             raise
@@ -1112,7 +1118,7 @@ def vw_optimize_over_cv(vw_filename, kfold, args, metric, config,
     vw_metrics = [x for x in [metric] + other_metrics if x.startswith('vw')]
 
     if calculated_metrics:
-        y_true = _load_first_float_from_each_string(vw_filename)
+        y_true = _load_labels(vw_filename)  # XXX named_labels
     else:
         y_true = None
 
@@ -1159,7 +1165,7 @@ def vw_optimize_over_cv(vw_filename, kfold, args, metric, config,
             if raw_pred_txt and len(y_true) != len(raw_pred_txt):
                 sys.exit('Internal error: expected %r raw predictions, got %r' % (len(y_true), len(raw_pred_txt)))
 
-        y_pred = _load_first_float_from_each_string(y_pred_txt)
+        y_pred = _load_labels(y_pred_txt)  # XXX named_labels
         result = calculate_or_extract_score(metric, y_true, y_pred, config, outputs)
 
         if isinstance(result, basestring):
@@ -1424,7 +1430,7 @@ def read_y_true(filename, format, columnspec, ignoreheader, named_labels):
         y_true.append(label)
 
     if not named_labels:
-        y_true = _load_first_float_from_each_string(y_true)
+        y_true = _load_labels(y_true)
 
     return y_true
 
@@ -1522,7 +1528,7 @@ def get_sample_weight(y_true, config):
     return result
 
 
-def convert_row_to_vw(row, columnspec, preprocessor=None, weights=None, named_labels=None):
+def convert_row_to_vw(row, columnspec, preprocessor, weights, named_labels):
     assert isinstance(columnspec, list), columnspec
 
     if columnspec[-1] == '*':
@@ -1561,7 +1567,7 @@ def convert_row_to_vw(row, columnspec, preprocessor=None, weights=None, named_la
     else:
         weight_key = y
         if y not in named_labels:
-            sys.exit('Label not recognized: %r (allowed: %r)' % (y, named_labels))
+            sys.exit('Label not recognized: %r' % (row, ))
 
     if weights is not None:
         weight = weights.get(weight_key, 1)
@@ -2319,7 +2325,7 @@ def main(to_cleanup):
             sys.exit('Must provide -p')
 
         assert y_true is not None
-        y_pred = _load_first_float_from_each_string(predictions, len(y_true))
+        y_pred = _load_labels(predictions, len(y_true), named_labels=config.get('named_labels'))
 
         for metric in options.metric:
             log_always('%s = %s', metric, _frmt_score(calculate_score(metric, y_true, y_pred, config)))
@@ -2403,7 +2409,7 @@ def main(to_cleanup):
             calc_num_features=show_num_features,
             capture_output=set([_get_stage(m) for m in vw_metrics]))
 
-        cv_pred = _load_first_float_from_each_string(cv_pred_txt)
+        cv_pred = _load_labels(cv_pred_txt, named_labels=config.get('named_labels'))
 
         for metric in options.metric:
             value = calculate_or_extract_score(metric, y_true, cv_pred, config, outputs)
@@ -2492,7 +2498,7 @@ def main(to_cleanup):
                 popen = Popen(vw_cmd, stdin=subprocess.PIPE, log_level=1)
                 for row in open_anything(sys.stdin, format, ignoreheader=options.ignoreheader, force_unbuffered=options.linemode):
                     # XXX weights
-                    line = convert_row_to_vw(row, columnspec=config.get('columnspec'), preprocessor=preprocessor)
+                    line = convert_row_to_vw(row, columnspec=config.get('columnspec'), preprocessor=preprocessor, weights=None, named_labels=config.get('named_labels'))
                     popen.stdin.write(line)
                     # subprocess.Popen is unbuffered by default
                 popen.stdin.close()
@@ -2512,7 +2518,7 @@ def main(to_cleanup):
         if options.toperrors or calculated_metrics:
             assert predictions_fname is not None
             assert y_true is not None
-            y_pred, y_pred_text = _load_first_float_from_each_string(predictions_fname, len(y_true), with_text=True)
+            y_pred, y_pred_text = _load_labels(predictions_fname, len(y_true), with_text=True, named_labels=config.get('named_labels'))
 
         for metric in calculated_metrics:
             log_always('%s = %s', metric, _frmt_score(calculate_score(metric, y_true, y_pred, config)))
