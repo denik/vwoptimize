@@ -2104,6 +2104,7 @@ def main(to_cleanup):
     parser.add_option('-d', '--data')
     parser.add_option('-a', '--audit', action='store_true')
     parser.add_option('--named_labels')
+    parser.add_option('--named_labels_file')
 
     parser.add_option('--readconfig')
     parser.add_option('--writeconfig')
@@ -2190,9 +2191,13 @@ def main(to_cleanup):
             sys.exit('File not found: %s' % filename)
 
     named_labels = _make_proper_list(options.named_labels, proper_label)
+    if options.named_labels_file:
+        named_labels_file = [x.strip() for x in open(options.named_labels_file).readlines()]
+        named_labels = named_labels_file + (named_labels or [])
+
     if named_labels is not None:
         config['named_labels'] = named_labels
-        args += ['--named_labels', options.named_labels]
+        args += ['--named_labels', ','.join(named_labels)]
 
     weight = parse_weight(options.weight, config.get('named_labels'))
     weight_train = parse_weight(options.weight_train, config.get('named_labels')) or weight
