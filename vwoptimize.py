@@ -2377,7 +2377,9 @@ def main(to_cleanup):
 
     is_multiclass = any([read_argument(args, '--' + x) for x in 'oaa ect csoaa log_multi recall_tree'.split()])
 
-    if calculated_metrics or options.toperrors:
+    need_y_true_and_y_pred = calculated_metrics or options.toperrors or options.classification_report
+
+    if need_y_true_and_y_pred:
         assert filename is not None
         y_true = read_y_true(filename, format, config.get('columnspec'), options.ignoreheader, config.get('named_labels'))
         if not len(y_true):
@@ -2541,7 +2543,7 @@ def main(to_cleanup):
 
         predictions_fname = options.predictions
 
-        if calculated_metrics or options.toperrors:
+        if need_y_true_and_y_pred:
             if not predictions_fname or predictions_fname in STDOUT_NAMES:
                 predictions_fname = get_temp_filename('pred')
                 to_cleanup.append(predictions_fname)
@@ -2594,7 +2596,7 @@ def main(to_cleanup):
         y_pred = None
         y_pred_text = None
 
-        if options.toperrors or calculated_metrics:
+        if need_y_true_and_y_pred:
             assert predictions_fname is not None
             assert y_true is not None
             y_pred, y_pred_text = _load_labels(predictions_fname, len(y_true), with_text=True, named_labels=config.get('named_labels'))
@@ -2609,6 +2611,8 @@ def main(to_cleanup):
             print_toperrors(options.toperrors, y_true, y_pred, y_pred_text, filename=filename, format=format, ignoreheader=options.ignoreheader)
 
         if options.classification_report:
+            assert y_true is not None
+            assert y_pred is not None
             log_classification_report(y_true, y_pred, labels=config.get('named_labels'), threshold=config.get('threshold'))  # XXX sample_weight
 
     if final_regressor_tmp:
