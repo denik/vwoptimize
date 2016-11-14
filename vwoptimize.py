@@ -29,6 +29,7 @@ VW_CMD = 'vw'
 VOWPAL_WABBIT_ERRORS = "error|won't work right|errno|can't open|vw::vw_exception|need a cache file for multiple passes"
 DEFAULT_COLUMNSPEC = 'y,text,*'
 METRIC_FORMAT = 'mean'
+DEFAULT_METRICS = ['vw_average_loss']
 
 AWK_TRAINSET = "awk '(NR - $fold) % KFOLDS != 0' VW |"
 AWK_TESTSET = "awk '(NR - $fold) % KFOLDS == 0' VW |"
@@ -1716,6 +1717,8 @@ def calculate_or_extract_score(metric, y_true, y_pred, config, outputs):
             return extract_score(metric, outputs)
         return calculate_score(metric, y_true, y_pred, config)
     except Exception, ex:
+        if LOG_LEVEL <= 0:
+            traceback.print_exc()
         return '%s: %s' % (type(ex).__name__, ex)
 
 
@@ -1734,7 +1737,7 @@ def _get_stage(metric):
 
 def extract_score(metric, outputs):
     stage, metric = _parse_vw_metric(metric)
-    outputs = outputs.get(stage)
+    outputs = (outputs or {}).get(stage)
 
     if not outputs:
         raise ValueError('error: No output for stage %r' % stage)
@@ -1806,7 +1809,7 @@ def calculate_score(metric, y_true, y_pred, config):
         raise ValueError('Unknown metric: %r' % metric)
 
 
-def _log_classification_report(*args, **kwargs):
+def _log_classification_report(prefix, *args, **kwargs):
     result = classification_report(*args, **kwargs)
     maxwidth = {}
 
@@ -1815,6 +1818,8 @@ def _log_classification_report(*args, **kwargs):
             maxwidth[column] = max(maxwidth.get(column, 0), len(item))
 
     for line in result:
+        if prefix:
+            sys.stderr.write(prefix)
         for column, item in enumerate(line):
             frmt = '%' + str(maxwidth[column]) + 's '
             sys.stderr.write(frmt % item)
@@ -1886,7 +1891,7 @@ def main_tune(metric, config, filename, format, args, preprocessor_base, kfold, 
         preprocessor_base = preprocessor_base.to_options()
 
     if not metric:
-        sys.exit('Provide metric to optimize for with "--metric METRIC"')
+        metric = DEFAULT_METRICS
 
     optimization_metric = metric[0]
     other_metrics = metric[1:]
@@ -2154,6 +2159,65 @@ def cleanup_vw_train_options(vw_args):
     return ' '.join(vw_args)
 
 
+def log_report(prefix, metrics, breakdown_re, y_true, y_pred, y_pred_text, config, classification_report, outputs=None):
+    for metric in metrics:
+        log_always('%s%s = %s', prefix, metric, _frmt_score(calculate_or_extract_score(metric, y_true, y_pred, config, outputs=outputs)))
+
+    calculated_metrics = [x for x in metrics if not x.startswith('vw')]
+
+    if classification_report:
+        assert y_true is not None
+        assert y_pred is not None
+        log_classification_report(prefix, y_true, y_pred, labels=config.get('named_labels'), threshold=config.get('threshold'))  # XXX sample_weight
+
+    if breakdown_re:
+        NOMATCH = 'nomatch'
+        breakdown_indices = {NOMATCH: 0}
+        breakdown_mask = []
+        max_length = len(NOMATCH)
+
+        for item in y_pred_text:
+            item = item.split(' ', 1)
+            if len(item) <= 1:
+                breakdown_mask.append(0)
+                continue
+            item = item[-1].strip()
+            m = breakdown_re.search(item)
+            if m is None:
+                breakdown_mask.append(0)
+                continue
+            else:
+                group = m.groups()
+                if group == ():
+                    group = m.group(0)
+                else:
+                    group = ','.join(group)
+                index = breakdown_indices.get(group)
+                if index is None:
+                    index = len(breakdown_indices)
+                    breakdown_indices[group] = index
+                breakdown_mask.append(index)
+                if len(group) > max_length:
+                    max_length = len(group)
+
+        max_length = '%' + str(max_length) + 's'
+
+        breakdown_mask = np.array(breakdown_mask)
+        breakdown_indices = breakdown_indices.items()
+        breakdown_indices.sort()
+        breakdown_indices = [x for x in breakdown_indices if x[0] != NOMATCH] + [x for x in breakdown_indices if x[0] == NOMATCH]
+        for group, group_index in breakdown_indices:
+            mask = breakdown_mask != group_index
+            y_true_subset = np.ma.MaskedArray(y_true, mask=mask).compressed()
+            y_pred_subset = np.ma.MaskedArray(y_pred, mask=mask).compressed()
+            assert y_true_subset.shape == y_pred_subset.shape, (y_true_subset.shape, y_pred_subset.shape)
+            for metric in calculated_metrics:
+                log_always('%sbreakdown %s %s = %s', prefix, max_length % group, metric, _frmt_score(calculate_score(metric, y_true_subset, y_pred_subset, config)))
+
+            if classification_report:
+                log_classification_report(prefix, y_true_subset, y_pred_subset, labels=config.get('named_labels'), threshold=config.get('threshold'))  # XXX sample_weight
+
+
 def main(to_cleanup):
     if '--parseaudit' in sys.argv:
         parser = optparse.OptionParser()
@@ -2211,6 +2275,7 @@ def main(to_cleanup):
     parser.add_option('--toperrors')
     parser.add_option('--threshold', type=float)
     parser.add_option('--classification_report', action='store_true')
+    parser.add_option('--breakdown')
 
     # logging and debugging and misc
     parser.add_option('--morelogs', action='count', default=0)
@@ -2241,6 +2306,9 @@ def main(to_cleanup):
 
     if options.kfold is not None and options.kfold <= 1:
         sys.exit('kfold parameter must > 1')
+
+    if options.breakdown:
+        options.breakdown = re.compile(options.breakdown)
 
     if options.feature_mask_retrain_args:
         options.feature_mask_retrain = options.feature_mask_retrain_args
@@ -2344,7 +2412,7 @@ def main(to_cleanup):
             need_tuning = 1
             break
 
-    options.metric = _make_proper_list(options.metric) or ['vw_average_loss']
+    options.metric = _make_proper_list(options.metric) or []
     show_num_features = 'num_features' in options.metric
     options.metric = [x for x in options.metric if 'num_features' != x]
 
@@ -2356,8 +2424,9 @@ def main(to_cleanup):
     vw_metrics = [x for x in options.metric if x.startswith('vw')]
 
     y_true = None
+    need_y_true_and_y_pred = calculated_metrics or options.toperrors or options.classification_report
 
-    if calculated_metrics or options.kfold or need_tuning or options.feature_mask_retrain is not None or options.toperrors:
+    if need_y_true_and_y_pred or options.kfold or need_tuning or options.feature_mask_retrain is not None:
         # cannot work with stdin, write it to a temp file
         if filename is None:
             filename = get_temp_filename(format)
@@ -2383,8 +2452,6 @@ def main(to_cleanup):
 
     is_multiclass = any([read_argument(args, '--' + x) for x in 'oaa ect csoaa log_multi recall_tree'.split()])
 
-    need_y_true_and_y_pred = calculated_metrics or options.toperrors or options.classification_report
-
     if need_y_true_and_y_pred:
         assert filename is not None
         y_true = read_y_true(filename, format, config.get('columnspec'), options.ignoreheader, config.get('named_labels'))
@@ -2400,8 +2467,6 @@ def main(to_cleanup):
     if options.report:
         # XXX major source of confusion when report is done on multiclass, since it tries to calculate threshold for it rather than
         # treating it as multiclass. Perhaps refuse to calculate threshold if min_value/max_value is not 0/1 or -1/1 or if there more than 2 classes
-        assert options.metric
-        assert calculated_metrics
         if options.predictions in STDIN_NAMES:
             if used_stdin:
                 sys.exit('Can only use stdin in one argument')
@@ -2412,10 +2477,17 @@ def main(to_cleanup):
             sys.exit('Must provide -p')
 
         assert y_true is not None
-        y_pred = _load_labels(predictions, len(y_true), named_labels=config.get('named_labels'))
+        y_pred, y_pred_text = _load_labels(predictions, len(y_true), with_text=True, named_labels=config.get('named_labels'))
 
-        for metric in options.metric:
-            log_always('%s = %s', metric, _frmt_score(calculate_score(metric, y_true, y_pred, config)))
+        log_report(prefix='',
+                   # vw_* metrics not supported here, but pass them anyway to let the caller now
+                   metrics=options.metric,
+                   breakdown_re=options.breakdown,
+                   y_true=y_true,
+                   y_pred=y_pred,
+                   y_pred_text=y_pred_text,
+                   config=config,
+                   classification_report=options.classification_report)
 
         sys.exit(0)
 
@@ -2430,13 +2502,11 @@ def main(to_cleanup):
                 args[index:index + 2] = [get_tuning_config(arg + ' ' + next_arg)]
         index += 1
 
-    metric = options.metric or ['vw_average_loss']
-
     if need_tuning:
         # QQQ --initial_regressor is not passed there
         assert not options.audit, '-a incompatible with parameter tuning'
         vw_args, preprocessor = main_tune(
-            metric=metric,
+            metric=options.metric,
             config=config,
             filename=filename,
             format=format,
@@ -2485,7 +2555,7 @@ def main(to_cleanup):
 
         assert vw_filename
 
-        cv_pred_txt, raw_cv_pred_txt, num_features, outputs = vw_cross_validation(
+        cv_pred_text, raw_cv_pred_text, num_features, outputs = vw_cross_validation(
             vw_filename,
             options.kfold,
             vw_args,
@@ -2494,26 +2564,31 @@ def main(to_cleanup):
             with_raw_predictions=bool(options.raw_predictions),
             feature_mask_retrain=options.feature_mask_retrain,
             calc_num_features=show_num_features,
-            capture_output=set([_get_stage(m) for m in vw_metrics]))
+            capture_output=set([_get_stage(m) for m in (vw_metrics or DEFAULT_METRICS)]))
 
-        cv_pred = _load_labels(cv_pred_txt, named_labels=config.get('named_labels'))
+        cv_pred = _load_labels(cv_pred_text, named_labels=config.get('named_labels'))
 
-        for metric in options.metric:
-            value = calculate_or_extract_score(metric, y_true, cv_pred, config, outputs)
-            if value is not None:
-                log_always('%s-fold %s = %s', options.kfold, metric, _frmt_score(value))
+        log_report(prefix='%s-fold ' % options.kfold,
+                   metrics=options.metric or DEFAULT_METRICS,
+                   breakdown_re=options.breakdown,
+                   y_true=y_true,
+                   y_pred=cv_pred,
+                   y_pred_text=cv_pred_text,
+                   config=config,
+                   classification_report=options.classification_report,
+                   outputs=outputs)
 
         if show_num_features and num_features:
             log_always('%s-fold num_features = %s', options.kfold, _frmt_score(num_features))
 
         if options.predictions:
-            write_file(options.predictions, cv_pred_txt)
+            write_file(options.predictions, cv_pred_text)
 
         if options.raw_predictions:
-            write_file(options.raw_predictions, raw_cv_pred_txt)
+            write_file(options.raw_predictions, raw_cv_pred_text)
 
         if options.toperrors:
-            print_toperrors(options.toperrors, y_true, cv_pred, cv_pred_txt, filename=filename, format=format, ignoreheader=options.ignoreheader)
+            print_toperrors(options.toperrors, y_true, cv_pred, cv_pred_text, filename=filename, format=format, ignoreheader=options.ignoreheader)
 
         # all of these are related to CV if --cv is enabled
         options.predictions = None
@@ -2607,19 +2682,21 @@ def main(to_cleanup):
             assert y_true is not None
             y_pred, y_pred_text = _load_labels(predictions_fname, len(y_true), with_text=True, named_labels=config.get('named_labels'))
 
-        for metric in calculated_metrics:
-            log_always('%s = %s', metric, _frmt_score(calculate_score(metric, y_true, y_pred, config)))
+        # we don't support extracted metrics there because we don't capture stderr. Pass them anyway, to let the user know.
+        log_report(prefix='',
+                   metrics=options.metric,
+                   breakdown_re=options.breakdown,
+                   y_true=y_true,
+                   y_pred=y_pred,
+                   y_pred_text=y_pred_text,
+                   config=config,
+                   classification_report=options.classification_report)
 
         if show_num_features and readable_model:
             log_always('num_features = %s', get_num_features(readable_model))
 
         if options.toperrors:
             print_toperrors(options.toperrors, y_true, y_pred, y_pred_text, filename=filename, format=format, ignoreheader=options.ignoreheader)
-
-        if options.classification_report:
-            assert y_true is not None
-            assert y_pred is not None
-            log_classification_report(y_true, y_pred, labels=config.get('named_labels'), threshold=config.get('threshold'))  # XXX sample_weight
 
     if final_regressor_tmp:
         os.rename(final_regressor_tmp, final_regressor)
