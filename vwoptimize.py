@@ -1756,6 +1756,9 @@ def extract_score(metric, outputs):
 
 
 def calculate_score(metric, y_true, y_pred, config):
+    if metric == 'count':
+        return len(y_pred)
+
     sample_weight = get_sample_weight(y_true, config.get('weight_metric'))
 
     threshold = config.get('threshold')
