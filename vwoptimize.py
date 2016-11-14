@@ -2159,64 +2159,86 @@ def cleanup_vw_train_options(vw_args):
     return ' '.join(vw_args)
 
 
-def log_report(prefix, metrics, breakdown_re, y_true, y_pred, y_pred_text, config, classification_report, outputs=None):
+def get_breakdown_group(breakdown_re, item):
+    item = item.split(' ', 1)
+    if len(item) >= 2:
+        item = item[-1].strip()
+    else:
+        item = ''
+    m = breakdown_re.search(item)
+    if m is None:
+        return 'nomatch'
+    else:
+        group = m.groups()
+        if group == ():
+            group = m.group(0)
+        else:
+            group = ','.join(group)
+        return group
+
+
+def log_report_one(prefix, metrics, y_true, y_pred, config, classification_report, outputs=None, mask=None):
+
+    if mask is not None:
+        y_true = np.ma.MaskedArray(y_true, mask=mask).compressed()
+        y_pred = np.ma.MaskedArray(y_pred, mask=mask).compressed()
+        assert y_true.shape == y_pred.shape, (y_true.shape, y_pred.shape)
+
     for metric in metrics:
         log_always('%s%s = %s', prefix, metric, _frmt_score(calculate_or_extract_score(metric, y_true, y_pred, config, outputs=outputs)))
-
-    calculated_metrics = [x for x in metrics if not x.startswith('vw')]
 
     if classification_report:
         assert y_true is not None
         assert y_pred is not None
         log_classification_report(prefix, y_true, y_pred, labels=config.get('named_labels'), threshold=config.get('threshold'))  # XXX sample_weight
 
+
+def log_report(prefix, metrics, breakdown_re, breakdown_top, y_true, y_pred, y_pred_text, config, classification_report, outputs=None):
+    log_report_one(prefix, metrics, y_true, y_pred, config, classification_report, outputs=outputs)
+
+    calculated_metrics = [x for x in metrics if not x.startswith('vw')]
+
     if breakdown_re:
-        NOMATCH = 'nomatch'
-        breakdown_indices = {NOMATCH: 0}
-        breakdown_mask = []
-        max_length = len(NOMATCH)
+        breakdown_counts = {}
 
         for item in y_pred_text:
-            item = item.split(' ', 1)
-            if len(item) <= 1:
-                breakdown_mask.append(0)
-                continue
-            item = item[-1].strip()
-            m = breakdown_re.search(item)
-            if m is None:
-                breakdown_mask.append(0)
-                continue
-            else:
-                group = m.groups()
-                if group == ():
-                    group = m.group(0)
-                else:
-                    group = ','.join(group)
-                index = breakdown_indices.get(group)
-                if index is None:
-                    index = len(breakdown_indices)
-                    breakdown_indices[group] = index
-                breakdown_mask.append(index)
-                if len(group) > max_length:
-                    max_length = len(group)
+            group = get_breakdown_group(breakdown_re, item)
+            breakdown_counts[group] = 1 + breakdown_counts.get(group, 0)
 
+        breakdown_counts = [(-v, k == 'nomatch', k) for (k, v) in breakdown_counts.items()]
+        breakdown_counts.sort()
+
+        print_rest = False
+
+        if breakdown_top:
+            print_rest = breakdown_top != len(breakdown_counts)
+            breakdown_counts = breakdown_counts[:breakdown_top]
+
+        groups = [x[-1] for x in breakdown_counts]
+
+        indices = {}
+        for group in groups:
+            indices[group] = len(indices)
+
+        rest_index = len(indices)
+        breakdown_mask = []
+
+        for item in y_pred_text:
+            group = get_breakdown_group(breakdown_re, item)
+            breakdown_mask.append(indices.get(group, rest_index))
+
+        max_length = max(len(x) for x in groups)
         max_length = '%' + str(max_length) + 's'
-
         breakdown_mask = np.array(breakdown_mask)
-        breakdown_indices = breakdown_indices.items()
-        breakdown_indices.sort()
-        breakdown_indices = [x for x in breakdown_indices if x[0] != NOMATCH] + [x for x in breakdown_indices if x[0] == NOMATCH]
-        for group, group_index in breakdown_indices:
+
+        for group in groups:
+            group_index = indices.get(group, rest_index)
             mask = breakdown_mask != group_index
-            y_true_subset = np.ma.MaskedArray(y_true, mask=mask).compressed()
-            y_pred_subset = np.ma.MaskedArray(y_pred, mask=mask).compressed()
-            assert y_true_subset.shape == y_pred_subset.shape, (y_true_subset.shape, y_pred_subset.shape)
-            for metric in calculated_metrics:
-                log_always('%sbreakdown %s %s = %s', prefix, max_length % group, metric, _frmt_score(calculate_score(metric, y_true_subset, y_pred_subset, config)))
+            log_report_one(prefix + 'breakdown ' + (max_length % group) + ' ', calculated_metrics, y_true, y_pred, config, classification_report, mask=mask)
 
-            if classification_report:
-                log_classification_report(prefix, y_true_subset, y_pred_subset, labels=config.get('named_labels'), threshold=config.get('threshold'))  # XXX sample_weight
-
+        if print_rest:
+            mask = breakdown_mask != rest_index
+            log_report_one(prefix + 'breakdown rest ', calculated_metrics, y_true, y_pred, config, classification_report, mask=mask)
 
 def main(to_cleanup):
     if '--parseaudit' in sys.argv:
@@ -2276,6 +2298,7 @@ def main(to_cleanup):
     parser.add_option('--threshold', type=float)
     parser.add_option('--classification_report', action='store_true')
     parser.add_option('--breakdown')
+    parser.add_option('--breakdown_top', type=int)
 
     # logging and debugging and misc
     parser.add_option('--morelogs', action='count', default=0)
@@ -2486,6 +2509,7 @@ def main(to_cleanup):
                    # vw_* metrics not supported here, but pass them anyway to let the caller now
                    metrics=options.metric,
                    breakdown_re=options.breakdown,
+                   breakdown_top=options.breakdown_top,
                    y_true=y_true,
                    y_pred=y_pred,
                    y_pred_text=y_pred_text,
@@ -2574,6 +2598,7 @@ def main(to_cleanup):
         log_report(prefix='%s-fold ' % options.kfold,
                    metrics=options.metric or DEFAULT_METRICS,
                    breakdown_re=options.breakdown,
+                   breakdown_top=options.breakdown_top,
                    y_true=y_true,
                    y_pred=cv_pred,
                    y_pred_text=cv_pred_text,
@@ -2689,6 +2714,7 @@ def main(to_cleanup):
         log_report(prefix='',
                    metrics=options.metric,
                    breakdown_re=options.breakdown,
+                   breakdown_top=options.breakdown_top,
                    y_true=y_true,
                    y_pred=y_pred,
                    y_pred_text=y_pred_text,
