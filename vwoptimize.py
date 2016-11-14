@@ -1140,7 +1140,7 @@ def vw_optimize_over_cv(vw_filename, kfold, args, metric, config,
         log('Trying %s %s...', VW_CMD, args)
 
         try:
-            y_pred_txt, raw_pred_txt, num_features, outputs = vw_cross_validation(
+            y_pred_text, raw_pred_text, num_features, outputs = vw_cross_validation(
                 vw_filename,
                 kfold,
                 args,
@@ -1159,13 +1159,13 @@ def vw_optimize_over_cv(vw_filename, kfold, args, metric, config,
             return 0.0
 
         if y_true is not None:
-            if calculated_metrics and len(y_true) != len(y_pred_txt):
-                sys.exit('Internal error: expected %r predictions, got %r' % (len(y_true), len(y_pred_txt)))
+            if calculated_metrics and len(y_true) != len(y_pred_text):
+                sys.exit('Internal error: expected %r predictions, got %r' % (len(y_true), len(y_pred_text)))
 
-            if raw_pred_txt and len(y_true) != len(raw_pred_txt):
-                sys.exit('Internal error: expected %r raw predictions, got %r' % (len(y_true), len(raw_pred_txt)))
+            if raw_pred_text and len(y_true) != len(raw_pred_text):
+                sys.exit('Internal error: expected %r raw predictions, got %r' % (len(y_true), len(raw_pred_text)))
 
-        y_pred = _load_labels(y_pred_txt)  # XXX named_labels
+        y_pred = _load_labels(y_pred_text)  # XXX named_labels
         result = calculate_or_extract_score(metric, y_true, y_pred, config, outputs)
 
         if isinstance(result, basestring):
