@@ -2380,7 +2380,10 @@ def main(to_cleanup):
     format = format or config.get('format')
 
     if not format:
-        format = 'vw'
+        if options.columnspec:
+            format = 'csv'
+        else:
+            format = 'vw'
 
     if options.columnspec:
         config['columnspec'] = _make_proper_list(options.columnspec)
