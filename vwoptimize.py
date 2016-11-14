@@ -2155,7 +2155,15 @@ def cleanup_vw_train_options(vw_args):
 
 
 def main(to_cleanup):
-    if '--report' in sys.argv or '--parseaudit' in sys.argv or '--tovw' in sys.argv or '--tovw_simple' in sys.argv:
+    if '--parseaudit' in sys.argv:
+        parser = optparse.OptionParser()
+        parser.add_option('--parseaudit', action='store_true')
+        if sys.argv[1:] != ['--parseaudit']:
+            sys.exit('Unexpected arguments with --parseaudit: %r' % sys.argv[1:])
+        parseaudit(sys.stdin)
+        sys.exit(0)
+
+    if '--report' in sys.argv or '--tovw' in sys.argv or '--tovw_simple' in sys.argv:
         parser = optparse.OptionParser()
     else:
         parser = PassThroughOptionParser()
@@ -2208,7 +2216,6 @@ def main(to_cleanup):
     parser.add_option('--morelogs', action='count', default=0)
     parser.add_option('--lesslogs', action='count', default=0)
     parser.add_option('--keeptmp', action='store_true')
-    parser.add_option('--parseaudit', action='store_true')
     parser.add_option('--linemode', action='store_true')
 
     # extra
@@ -2231,10 +2238,6 @@ def main(to_cleanup):
     if options.foldscript:
         assert options.foldscript in ('perl', 'awk'), options.foldscript
         globals()['FOLDSCRIPT'] = options.foldscript
-
-    if options.parseaudit:
-        parseaudit(sys.stdin)
-        sys.exit(0)
 
     if options.kfold is not None and options.kfold <= 1:
         sys.exit('kfold parameter must > 1')
