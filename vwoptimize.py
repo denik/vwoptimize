@@ -2130,7 +2130,12 @@ def print_toperrors(toperrors, y_true, y_pred, y_pred_text, filename, format, ig
 
     for yp, yp_text, yt, example in zip(y_pred, y_pred_text, y_true, open_anything(filename, format, ignoreheader=ignoreheader)):
         # add hash of the example as a second item so that we get a mix of false positives and false negatives for a given error level
-        errors.append((abs(yp - yt), hash(repr(example)), yp_text.strip(), example))
+        try:
+            err = abs(yp - yt)
+        except TypeError:
+            # XXX for multiclass, fetch raw scores
+            err = 1 if yp != yt else 0
+        errors.append((err, hash(repr(example)), yp_text.strip(), example))
 
     errors.sort(reverse=True)
 
