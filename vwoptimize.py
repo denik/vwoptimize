@@ -1768,13 +1768,16 @@ def calculate_score(metric, y_true, y_pred, config):
     min_label = config.get('min_label')
     max_label = config.get('max_label')
 
-    extra_args = {'sample_weight': sample_weight}
+    extra_args = {}
+
     if metric.endswith('_w'):
+        extra_args['sample_weight'] = sample_weight
         metric = metric[:-2]
-    else:
-        extra_args = {}
 
     fullname = metrics_shortcuts.get(metric, metric)
+
+    if 'precision' in fullname or 'recall' in fullname or 'f1' in fullname:
+        extra_args['average'] = 'binary'
 
     import sklearn.metrics
     if fullname in globals():
