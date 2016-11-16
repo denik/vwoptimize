@@ -2254,49 +2254,54 @@ def log_report_one(prefix, metrics, y_true, y_pred, config, classification_repor
 def log_report(prefix, metrics, breakdown_re, breakdown_top, y_true, y_pred, y_pred_text, config, classification_report, outputs=None):
     log_report_one(prefix, metrics, y_true, y_pred, config, classification_report, outputs=outputs)
 
+    if breakdown_top and not breakdown_re:
+        breakdown_re = re.compile('.+')
+
+    if not breakdown_re:
+        return
+
     calculated_metrics = [x for x in metrics if not x.startswith('vw')]
 
-    if breakdown_re:
-        breakdown_counts = {}
+    breakdown_counts = {}
 
-        for item in y_pred_text:
-            group = get_breakdown_group(breakdown_re, item)
-            breakdown_counts[group] = 1 + breakdown_counts.get(group, 0)
+    for item in y_pred_text:
+        group = get_breakdown_group(breakdown_re, item)
+        breakdown_counts[group] = 1 + breakdown_counts.get(group, 0)
 
-        breakdown_counts = [(-v, k == 'nomatch', k) for (k, v) in breakdown_counts.items()]
-        breakdown_counts.sort()
+    breakdown_counts = [(-v, k == 'nomatch', k) for (k, v) in breakdown_counts.items()]
+    breakdown_counts.sort()
 
-        print_rest = False
+    print_rest = False
 
-        if breakdown_top and breakdown_top < len(breakdown_counts):
-            print_rest = True
-            breakdown_counts = breakdown_counts[:breakdown_top]
+    if breakdown_top and breakdown_top < len(breakdown_counts):
+        print_rest = True
+        breakdown_counts = breakdown_counts[:breakdown_top]
 
-        groups = [x[-1] for x in breakdown_counts]
+    groups = [x[-1] for x in breakdown_counts]
 
-        indices = {}
-        for group in groups:
-            indices[group] = len(indices)
+    indices = {}
+    for group in groups:
+        indices[group] = len(indices)
 
-        rest_index = len(indices)
-        breakdown_mask = []
+    rest_index = len(indices)
+    breakdown_mask = []
 
-        for item in y_pred_text:
-            group = get_breakdown_group(breakdown_re, item)
-            breakdown_mask.append(indices.get(group, rest_index))
+    for item in y_pred_text:
+        group = get_breakdown_group(breakdown_re, item)
+        breakdown_mask.append(indices.get(group, rest_index))
 
-        max_length = max(len(x) for x in groups)
-        max_length = '%' + str(max_length) + 's'
-        breakdown_mask = np.array(breakdown_mask)
+    max_length = max(len(x) for x in groups)
+    max_length = '%' + str(max_length) + 's'
+    breakdown_mask = np.array(breakdown_mask)
 
-        for group in groups:
-            group_index = indices.get(group, rest_index)
-            mask = breakdown_mask != group_index
-            log_report_one(prefix + 'breakdown ' + (max_length % group) + ' ', calculated_metrics, y_true, y_pred, config, classification_report, mask=mask)
+    for group in groups:
+        group_index = indices.get(group, rest_index)
+        mask = breakdown_mask != group_index
+        log_report_one(prefix + 'breakdown ' + (max_length % group) + ' ', calculated_metrics, y_true, y_pred, config, classification_report, mask=mask)
 
-        if print_rest:
-            mask = breakdown_mask != rest_index
-            log_report_one(prefix + 'breakdown rest ', calculated_metrics, y_true, y_pred, config, classification_report, mask=mask)
+    if print_rest:
+        mask = breakdown_mask != rest_index
+        log_report_one(prefix + 'breakdown rest ', calculated_metrics, y_true, y_pred, config, classification_report, mask=mask)
 
 
 def main(to_cleanup):

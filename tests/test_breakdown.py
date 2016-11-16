@@ -61,6 +61,48 @@ $ vwoptimize.py -d simple.vw --metric acc,count --breakdown 'house' --quiet --kf
 3-fold breakdown   house count = 2
 3-fold breakdown nomatch acc = 1
 3-fold breakdown nomatch count = 1
+
+[breakdown_top_only1]
+$ vwoptimize.py -d simple.vw --metric acc,count --quiet --breakdown_top 1
+(0)acc = 0.333333
+count = 3
+breakdown second_house acc = 0
+breakdown second_house count = 1
+breakdown rest acc = 0.5
+breakdown rest count = 2
+
+[breakdown_top_only2]
+$ vwoptimize.py -d simple.vw --metric acc,count --quiet --breakdown_top 2
+(0)acc = 0.333333
+count = 3
+breakdown second_house acc = 0
+breakdown second_house count = 1
+breakdown  third_house acc = 0
+breakdown  third_house count = 1
+breakdown rest acc = 1
+breakdown rest count = 1
+
+[breakdown_top_only3]
+$ vwoptimize.py -d simple.vw --metric acc,count --quiet --breakdown_top 3
+(0)acc = 0.333333
+count = 3
+breakdown second_house acc = 0
+breakdown second_house count = 1
+breakdown  third_house acc = 0
+breakdown  third_house count = 1
+breakdown      nomatch acc = 1
+breakdown      nomatch count = 1
+
+[breakdown_top_only4]
+$ vwoptimize.py -d simple.vw --metric acc,count --quiet --breakdown_top 4
+(0)acc = 0.333333
+count = 3
+breakdown second_house acc = 0
+breakdown second_house count = 1
+breakdown  third_house acc = 0
+breakdown  third_house count = 1
+breakdown      nomatch acc = 1
+breakdown      nomatch count = 1
 """
 
 import sys
