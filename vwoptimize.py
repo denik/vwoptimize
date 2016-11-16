@@ -2268,8 +2268,8 @@ def log_report(prefix, metrics, breakdown_re, breakdown_top, y_true, y_pred, y_p
 
         print_rest = False
 
-        if breakdown_top:
-            print_rest = breakdown_top != len(breakdown_counts)
+        if breakdown_top and breakdown_top < len(breakdown_counts):
+            print_rest = True
             breakdown_counts = breakdown_counts[:breakdown_top]
 
         groups = [x[-1] for x in breakdown_counts]
