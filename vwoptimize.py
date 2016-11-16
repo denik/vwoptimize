@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# coding: utf-8
 """Wrapper for Vowpal Wabbit that does cross-validation and hyper-parameter tuning"""
 __version__ = '0.6.0dev'
 __gitdescribe__ = 'GIT'
@@ -13,7 +14,8 @@ import subprocess
 import time
 import json
 import pprint
-from itertools import izip_longest
+import unicodedata
+from itertools import izip, izip_longest
 from collections import deque
 from pipes import quote
 import numpy as np
@@ -1318,8 +1320,36 @@ def stem_words(words):
     return result
 
 
+def chinese_simplify(unistr, cache={}):
+    u"""
+    This function does the same as hanziconv's module toSimplified() but order of magnitude faster
+
+    >>> print chinese_simplify(u'繁簡轉換器')
+    繁简转换器
+
+    >>> from hanziconv import HanziConv
+    >>> from hanziconv.charmap import traditional_charmap
+    >>> HanziConv.toSimplified(traditional_charmap) == chinese_simplify(traditional_charmap)
+    True
+
+    >>> import timeit
+    >>> timeit.timeit(lambda : chinese_simplify(traditional_charmap), number=1000) # doctest:+SKIP
+    0.1961040496826172
+
+    >>> toSimplified = HanziConv.toSimplified
+    >>> timeit.timeit(lambda : toSimplified(traditional_charmap), number=1000) # doctest:+SKIP
+    4.9171209335327150
+    """
+    table = cache.get('table')
+    if table is None:
+        from hanziconv.charmap import traditional_charmap, simplified_charmap
+        table = dict((ord(char1), char2) for char1, char2 in izip(reversed(traditional_charmap), reversed(simplified_charmap)))
+        cache['table'] = table
+    return unistr.translate(table)
+
+
 class Preprocessor(object):
-    ALL_OPTIONS = 'htmlunescape lowercase strip_punct stem split_chars'.split()
+    ALL_OPTIONS = 'htmlunescape lowercase strip_punct stem split_chars split_ideographs chinese_simplify'.split()
     ALL_OPTIONS_DASHDASH = ['--%s' % x for x in ALL_OPTIONS]
 
     @classmethod
@@ -1352,13 +1382,15 @@ class Preprocessor(object):
     def to_options(self):
         return ['--%s' % opt for opt in self.ALL_OPTIONS if getattr(self, opt, None)]
 
-    def __init__(self, htmlunescape=False, lowercase=False, strip_punct=False, stem=False, split_chars=False, normalize_space=True, **ignored):
+    def __init__(self, htmlunescape=False, lowercase=False, strip_punct=False, stem=False, split_chars=False, split_ideographs=False, chinese_simplify=False, normalize_space=True, **ignored):
         self.normalize_space = normalize_space
         self.htmlunescape = htmlunescape
         self.lowercase = lowercase
         self.strip_punct = strip_punct
         self.stem = stem
         self.split_chars = split_chars
+        self.split_ideographs = split_ideographs
+        self.chinese_simplify = chinese_simplify
         if self.stem:
             stem_words(["testing"])
             self.lowercase = True
@@ -1385,6 +1417,9 @@ class Preprocessor(object):
             if self.lowercase:
                 text = text.lower()
 
+            if self.chinese_simplify:
+                text = chinese_simplify(text)
+
             if self.strip_punct:
                 words = re.findall(r"(?u)\b\w\w+\b", text)
             else:
@@ -1396,6 +1431,21 @@ class Preprocessor(object):
             if self.split_chars:
                 words = [' '.join(w) for w in words]
                 text = u' __ '.join(words)
+            elif self.split_ideographs:
+                newsplit = []
+                for char in u' '.join(words):
+                    try:
+                        name = unicodedata.name(char)
+                    except ValueError:
+                        # log_always(u"%r %s: %s", char, char, ex)
+                        # unicodedata.name fails with ValueError for smileys
+                        name = 'IDEOGRAPH'
+                    if 'IDEOGRAPH' in name:
+                        newsplit.append(u' ' + char + u' ')
+                    else:
+                        newsplit.append(char)
+                text = u''.join(newsplit)
+                text = re.sub(r'\s+', ' ', text)
             else:
                 text = u' '.join(words)
 
