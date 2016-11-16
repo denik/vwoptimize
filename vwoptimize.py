@@ -26,7 +26,7 @@ KEEPTMP = False
 STDIN_NAMES = ('/dev/stdin', '-')
 STDOUT_NAMES = ('/dev/stdout', 'stdout')
 VW_CMD = 'vw'
-VOWPAL_WABBIT_ERRORS = "error|won't work right|errno|can't open|vw::vw_exception|need a cache file for multiple passes"
+VOWPAL_WABBIT_ERRORS = "error|won't work right|errno|can't open|vw::vw_exception|need a cache file for multiple passes|cannot be specified"
 DEFAULT_COLUMNSPEC = 'y,text,*'
 METRIC_FORMAT = 'mean'
 DEFAULT_METRICS = ['vw_average_loss']
@@ -431,7 +431,7 @@ def run_subprocesses(cmds, workers=None, log_level=None):
 
                 if retcode:
                     log('failed: %s', popen._cmd.get('args', popen._cmd), log_level=3)
-                    return None, None
+                    return None, outputs
                 else:
                     log('%s %s', '-' if retcode == 0 else '!', popen._cmd, log_level=log_level)
 
