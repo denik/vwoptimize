@@ -2240,6 +2240,7 @@ def log_report(prefix, metrics, breakdown_re, breakdown_top, y_true, y_pred, y_p
             mask = breakdown_mask != rest_index
             log_report_one(prefix + 'breakdown rest ', calculated_metrics, y_true, y_pred, config, classification_report, mask=mask)
 
+
 def main(to_cleanup):
     if '--parseaudit' in sys.argv:
         parser = optparse.OptionParser()
