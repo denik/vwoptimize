@@ -2257,7 +2257,7 @@ def log_report(prefix, metrics, breakdown_re, breakdown_top, y_true, y_pred, y_p
     if breakdown_top and not breakdown_re:
         breakdown_re = re.compile('.+')
 
-    if not breakdown_re:
+    if not breakdown_re or not y_pred_text:
         return
 
     calculated_metrics = [x for x in metrics if not x.startswith('vw')]
@@ -2273,9 +2273,27 @@ def log_report(prefix, metrics, breakdown_re, breakdown_top, y_true, y_pred, y_p
 
     print_rest = False
 
-    if breakdown_top and breakdown_top < len(breakdown_counts):
-        print_rest = True
-        breakdown_counts = breakdown_counts[:breakdown_top]
+    if breakdown_top:
+        if '%' in breakdown_top:
+            breakdown_top = float(breakdown_top.rstrip('%')) / 100.0
+        elif '.' in breakdown_top:
+            breakdown_top = float(breakdown_top)
+        else:
+            breakdown_top = int(breakdown_top)
+
+        if isinstance(breakdown_top, float):
+            total_count = 0
+            n_items = 0
+            for count, _a, _b in breakdown_counts:
+                total_count += abs(count)
+                n_items += 1
+                if total_count / float(len(y_pred_text)) >= breakdown_top:
+                    break
+            breakdown_top = n_items
+
+        if breakdown_top and breakdown_top < len(breakdown_counts):
+            print_rest = True
+            breakdown_counts = breakdown_counts[:breakdown_top]
 
     groups = [x[-1] for x in breakdown_counts]
 
@@ -2362,7 +2380,7 @@ def main(to_cleanup):
     parser.add_option('--threshold', type=float)
     parser.add_option('--classification_report', action='store_true')
     parser.add_option('--breakdown')
-    parser.add_option('--breakdown_top', type=int)
+    parser.add_option('--breakdown_top')
 
     # logging and debugging and misc
     parser.add_option('--morelogs', action='count', default=0)

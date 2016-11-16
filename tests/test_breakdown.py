@@ -103,6 +103,17 @@ breakdown  third_house acc = 0
 breakdown  third_house count = 1
 breakdown      nomatch acc = 1
 breakdown      nomatch count = 1
+
+[breakdown_top_50%]
+$ vwoptimize.py -d simple.vw --metric acc,count --quiet --breakdown_top 50%
+(0)acc = 0.333333
+count = 3
+breakdown second_house acc = 0
+breakdown second_house count = 1
+breakdown  third_house acc = 0
+breakdown  third_house count = 1
+breakdown rest acc = 1
+breakdown rest count = 1
 """
 
 import sys
