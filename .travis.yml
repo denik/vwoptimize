@@ -19,7 +19,8 @@ before_install:
 install:
  - pip install -r requirements.txt
  - pip install flake8 shelldoctest
+ - pip install hanziconv
 script:
- - python -c 'import vwoptimize, doctest; doctest.testmod(vwoptimize)'
+ - python -c 'import vwoptimize, doctest, sys; sys.exit(doctest.testmod(vwoptimize).failed)'
  - cd tests && python ./shell-doctest --verbose=2 test && cd ..
  - flake8 --max-line-length=300 --ignore E402 *.py tests/
