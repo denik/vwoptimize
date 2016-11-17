@@ -2723,7 +2723,7 @@ def main(to_cleanup):
             show_num_features=show_num_features)
         if vw_args is None:
             sys.exit('tuning failed')
-        config['preprocessor'] = str(preprocessor)
+        config['preprocessor'] = str(preprocessor) if preprocessor else None
         config['vw_train_options'] = cleanup_vw_train_options(vw_args)
     else:
         vw_args = ' '.join(args)
