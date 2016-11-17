@@ -1337,8 +1337,79 @@ def chinese_simplify(unistr, cache={}):
     return unistr.translate(table)
 
 
+def get_regex(range_name, cache={}):
+    result = cache.get(range_name)
+    if result is not None:
+        return result
+    result = re.compile(_generate_regex(range_name, RANGES[range_name]))
+    cache[range_name] = result
+    return result
+
+
+def _generate_regex(name, range):
+    result = []
+    ignored = 0
+    included = 0
+    for item in range:
+        try:
+            count = 0
+            if len(item) == 1:
+                count = 1
+                result.append(unichr(item[0]))
+            else:
+                count = item[1] - item[0] + 1
+                result.append(unichr(item[0]) + '-' + unichr(item[1]))
+        except ValueError, ex:
+            if 'unichr() arg not in range' in str(ex):
+                ignored += count
+            else:
+                raise
+        else:
+            included += count
+
+    if ignored:
+        log_always("%s: Ignored %s characters (left with %s)", name, ignored, included)
+
+    if not included:
+        sys.exit('%s: empty range' % name)
+
+    return u'[' + u''.join(result) + u']'
+
+
+# ideograph total chars=75640
+# hangul total chars=11735
+# hiragana total chars=97
+# katakana total chars=223
+# combined total chars=87688
+RANGES = {
+    'combined': [[4352, 4607], [12272, 12283], [12288, 12290], [12293, 12295], [12330, 12335], [12343], [12347], [12350, 12351], [12353, 12438], [12441, 12543], [12593, 12686], [12688, 12703], [12784, 12828], [12832, 12871], [12896, 12923], [12926], [12928, 12976], [12992, 13003], [13008, 13054], [13144, 13168], [13280, 13310], [13312, 19893], [19968, 40907], [43360, 43388], [44032, 55203], [55216, 55238], [55243, 55291], [63744, 64045], [64048, 64109], [64112, 64217], [65041, 65042], [65105], [65377], [65380, 65470], [65474, 65479], [65482, 65487], [65490, 65495], [65498, 65500], [127488], [127504, 127537], [127552, 127560], [131072, 173782], [173824, 177972], [194560, 195101]],
+    'hangul': [[4352, 4607], [12334, 12335], [12593, 12686], [12800, 12828], [12896, 12923], [12926], [43360, 43388], [44032, 55203], [55216, 55238], [55243, 55291], [65440, 65470], [65474, 65479], [65482, 65487], [65490, 65495], [65498, 65500]],
+    'hiragana': [[12353, 12438], [12441, 12448], [12540], [65392], [127488]],
+    'ideographs': [[12272, 12283], [12288, 12290], [12293, 12295], [12330, 12333], [12343], [12347], [12350, 12351], [12688, 12703], [12832, 12871], [12928, 12976], [12992, 13003], [13144, 13168], [13280, 13310], [13312, 19893], [19968, 40907], [63744, 64045], [64048, 64109], [64112, 64217], [65041, 65042], [65105], [65377], [65380], [127504, 127506], [127508, 127537], [127552, 127560], [131072, 173782], [173824, 177972], [194560, 195101]],
+    'katakana': [[12441, 12444], [12448, 12543], [12784, 12799], [13008, 13054], [65381, 65439], [127507]]
+}
+
+
 class Preprocessor(object):
-    ALL_OPTIONS = 'htmlunescape lowercase strip_punct stem split_chars split_ideographs split_hangul split_hiragana split_katakana chinese_simplify NFKC'.split()
+    ur"""
+    >>> Preprocessor(split_ideographs=True, chinese_simplify=True).process_text(u'hello 繁簡轉換器'.encode('utf8'))
+    'hello \xe7\xb9\x81 \xe7\xae\x80 \xe8\xbd\xac \xe6\x8d\xa2 \xe5\x99\xa8'
+    """
+
+    ALL_OPTIONS = '''
+        htmlunescape
+        lowercase
+        strip_punct
+        stem
+        split_chars
+        split_ideographs
+        split_hangul
+        split_hiragana
+        split_katakana
+        split_combined
+        chinese_simplify
+        NFKC
+    '''.strip().split()
     ALL_OPTIONS_DASHDASH = ['--%s' % x for x in ALL_OPTIONS]
 
     @classmethod
@@ -1373,17 +1444,25 @@ class Preprocessor(object):
 
     def __init__(self, **kwargs):
         for option in self.ALL_OPTIONS:
-            if option in kwargs:
-                setattr(self, option, kwargs[option])
+            setattr(self, option, kwargs.get(option, False))
+
         if self.stem:
             stem_words(["testing"])
             self.lowercase = True
             self.strip_punct = True
-        if self.split_chars:
+
+        if self.split_chars or self.split_combined:
             self.split_ideographs = False
             self.split_hangul = False
             self.split_hiragana = False
             self.split_katakana = False
+
+        if self.split_chars:
+            self.split_combined = False
+
+        for range in RANGES:
+            if getattr(self, 'split_%s' % range):
+                setattr(self, 'split_%s' % range, get_regex(range))
 
     def __str__(self):
         return ' '.join(self.to_options())
@@ -1423,33 +1502,24 @@ class Preprocessor(object):
             if self.split_chars:
                 words = [' '.join(w) for w in words]
                 text = u' __ '.join(words)
-            elif self.split_ideographs or self.split_hangul or self.split_hiragana or self.split_katakana:
-                newsplit = []
-                for char in u' '.join(words):
-                    do_split = False
-                    try:
-                        name = unicodedata.name(char)
-                    except ValueError:
-                        # log_always(u"%r %s: %s", char, char, ex)
-                        # unicodedata.name fails with ValueError for smileys
-                        do_split = True
-                    else:
-                        if self.split_ideographs and 'IDEOGRAPH' in name:
-                            do_split = True
-                        elif self.split_hangul and 'HANGUL' in name:
-                            do_split = True
-                        elif self.split_hiragana and 'HIRAGANA' in name:
-                            do_split = True
-                        elif self.split_katakana and 'KATAKANA' in name:
-                            do_split = True
-                    if do_split:
-                        newsplit.append(u' ' + char + u' ')
-                    else:
-                        newsplit.append(char)
-                text = u''.join(newsplit)
-                text = re.sub(r'\s+', ' ', text)
             else:
                 text = u' '.join(words)
+                if self.split_combined:
+                    text = self.split_combined.sub(ur" \g<0> ", text)
+                else:
+                    if self.split_ideographs:
+                        text = self.split_ideographs.sub(ur" \g<0> ", text)
+
+                    if self.split_hiragana:
+                        text = self.split_hiragana.sub(ur" \g<0> ", text)
+
+                    if self.split_katakana:
+                        text = self.split_katakana.sub(ur" \g<0> ", text)
+
+                    if self.split_hangul:
+                        text = self.split_hangul.sub(ur" \g<0> ", text)
+
+                    text = re.sub(r'\s+', ' ', text.strip())
 
             return text.encode('utf-8')
         except Exception:
