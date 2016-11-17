@@ -1740,6 +1740,8 @@ def convert_any_to_vw(source, format, output_filename, columnspec, named_labels,
 
     assert isinstance(preprocessor, basestring), preprocessor
 
+    log('preprocessor = %s', preprocessor or '', importance=1 if preprocessor else 0)
+
     start = time.time()
 
     if source is None:
@@ -2035,9 +2037,6 @@ def main_tune(metric, config, filename, format, args, preprocessor_base, kfold, 
     for my_args in preprocessor_variants:
         preprocessor = Preprocessor.from_options(preprocessor_base + my_args)
         preprocessor_opts = ' '.join(preprocessor.to_options() if preprocessor else [])
-
-        if len(preprocessor_variants) != 1 or preprocessor_opts:
-            log('vwoptimize preprocessor = %s', preprocessor_opts, importance=1)
 
         previously_done = already_done.get(str(preprocessor))
 
@@ -2863,6 +2862,7 @@ def main(to_cleanup):
             if format == 'vw':
                 popen = Popen(vw_cmd, stdin=sys.stdin, importance=1)
             else:
+                log('preprocessor = %s', preprocessor, importance=1 if preprocessor else 0)
                 popen = Popen(vw_cmd, stdin=subprocess.PIPE, importance=1)
                 for row in open_anything(sys.stdin, format, ignoreheader=options.ignoreheader, force_unbuffered=options.linemode):
                     # XXX weights
