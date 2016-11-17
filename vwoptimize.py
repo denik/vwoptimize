@@ -22,7 +22,7 @@ import numpy as np
 
 
 csv.field_size_limit(10000000)
-LOG_LEVEL = 1
+MINIMUM_LOG_IMPORTANCE = 1
 TMPID = str(os.getpid())
 TMP_PREFIX = None
 KEEPTMP = False
@@ -130,9 +130,9 @@ def get_temp_filename(suffix, counter=[0]):
 
 
 def log(s, *params, **kwargs):
-    log_level = int(kwargs.pop('log_level', None) or 0)
+    importance = kwargs.pop('importance', None) or 0
     assert not kwargs, kwargs
-    if log_level >= LOG_LEVEL:
+    if importance >= MINIMUM_LOG_IMPORTANCE:
         sys.stdout.flush()
         try:
             s = s % params
@@ -142,7 +142,7 @@ def log(s, *params, **kwargs):
 
 
 def log_always(*args, **kwargs):
-    kwargs['log_level'] = LOG_LEVEL
+    kwargs['importance'] = MINIMUM_LOG_IMPORTANCE
     return log(*args, **kwargs)
 
 
@@ -238,16 +238,16 @@ class PassThroughOptionParser(optparse.OptionParser):
                 largs.append(e.opt_str)
 
 
-def system(cmd, log_level=1):
+def system(cmd, importance=1):
     if isinstance(cmd, deque):
         for item in cmd:
-            system(item, log_level=log_level)
+            system(item, importance=importance)
         return
 
     sys.stdout.flush()
     start = time.time()
 
-    popen = Popen(cmd, shell=True, log_level=log_level)
+    popen = Popen(cmd, shell=True, importance=importance)
 
     if popen.stdout is not None or popen.stderr is not None:
         out, err = popen.communicate()
@@ -257,7 +257,7 @@ def system(cmd, log_level=1):
     retcode = popen.wait()
 
     if retcode:
-        log('%s [%.1fs] %s', '-' if retcode == 0 else '!', time.time() - start, cmd, log_level=log_level - 1)
+        log('%s [%.1fs] %s', '-' if retcode == 0 else '!', time.time() - start, cmd, importance=importance - 1)
 
     if retcode:
         sys.exit(1)
@@ -265,7 +265,7 @@ def system(cmd, log_level=1):
     return (out or '') + (err or '')
 
 
-def split_file(source, nfolds=None, ignoreheader=False, log_level=0, minfoldsize=10000):
+def split_file(source, nfolds=None, ignoreheader=False, importance=0, minfoldsize=10000):
     if nfolds is None:
         nfolds = 10
 
@@ -361,7 +361,10 @@ def Popen(params, **kwargs):
         args = params
         params = kwargs
 
-    log_level = params.pop('log_level', 0)
+    importance = params.pop('importance', None)
+    if importance is None:
+        importance = 0
+
     params.setdefault('preexec_fn', die_if_parent_dies)
 
     if isinstance(args, list):
@@ -371,15 +374,15 @@ def Popen(params, **kwargs):
 
     name = params.pop('name', None)
     if name:
-        log('+ [%s] %s', name, command, log_level=log_level)
+        log('+ [%s] %s', name, command, importance=importance)
     else:
-        log('+ %s', command, log_level=log_level)
+        log('+ %s', command, importance=importance)
 
     popen = subprocess.Popen(args, **params)
     return popen
 
 
-def run_subprocesses(cmds, workers=None, log_level=None):
+def run_subprocesses(cmds, workers=None, importance=None):
     for item in cmds:
         if isinstance(item, deque):
             for subitem in item:
@@ -405,7 +408,7 @@ def run_subprocesses(cmds, workers=None, log_level=None):
                     this_cmd = cmd
                     followup = None
 
-                popen = Popen(this_cmd, shell=True)
+                popen = Popen(this_cmd, shell=True, importance=importance)
                 popen._cmd = this_cmd
                 popen._name = this_cmd.get('name', '')
                 popen._followup = followup
@@ -421,10 +424,10 @@ def run_subprocesses(cmds, workers=None, log_level=None):
                 retcode = popen.wait()
 
                 if retcode:
-                    log('failed: %s', popen._cmd.get('args', popen._cmd), log_level=3)
+                    log_always('failed: %s', popen._cmd.get('args', popen._cmd))
                     return None, outputs
                 else:
-                    log('%s %s', '-' if retcode == 0 else '!', popen._cmd, log_level=log_level)
+                    log('%s %s', '-' if retcode == 0 else '!', popen._cmd, importance=importance)
 
                 if popen._followup:
                     cmds_queue.append(popen._followup)
@@ -697,7 +700,7 @@ def vw_cross_validation(
             readable_models.append(readable_model.replace('$fold', this_fold))
 
     try:
-        success, outputs = run_subprocesses(commands, workers=workers, log_level=-1)
+        success, outputs = run_subprocesses(commands, workers=workers, importance=-1)
 
         # check outputs first, the might be a valuable error message there
         outputs = dict((key, [parse_vw_output(out) for out in value]) for (key, value) in outputs.items())
@@ -1146,7 +1149,7 @@ def vw_optimize_over_cv(vw_filename, kfold, args, metric, config,
         except BaseException, ex:
             if type(ex) is not SystemExit:
                 traceback.print_exc()
-            log('Result %s %s... error: %s', VW_CMD, args, ex, log_level=1)
+            log('Result %s %s... error: %s', VW_CMD, args, ex, importance=1)
             cache[args] = 0.0
             return 0.0
 
@@ -1189,7 +1192,7 @@ def vw_optimize_over_cv(vw_filename, kfold, args, metric, config,
 
         other_results = (is_best + other_results).rstrip()
 
-        log('Result %s %s... %s=%s%s', VW_CMD, args, metric, _frmt_score_short(result), other_results, log_level=1 + bool(is_best))
+        log('Result %s %s... %s=%s%s', VW_CMD, args, metric, _frmt_score_short(result), other_results, importance=1 + int(bool(is_best)))
 
         cache[args] = result
         return result
@@ -1201,10 +1204,10 @@ def vw_optimize_over_cv(vw_filename, kfold, args, metric, config,
     for params in expand(gridsearch_params):
         params_normalized = vw_normalize_params(base_args + params)
         if params_normalized != params:
-            log('Normalized params %r %r -> %r', base_args, params, params_normalized, log_level=-1)
+            log('Normalized params %r %r -> %r', base_args, params, params_normalized, importance=-1)
         params_as_str = ' '.join(params_normalized)
         if params_as_str in already_done:
-            log('Skipping %r (same as %r)', ' '.join(params), ' '.join(already_done[params_as_str]), log_level=-1)
+            log('Skipping %r (same as %r)', ' '.join(params), ' '.join(already_done[params_as_str]), importance=-1)
             continue
         already_done[params_as_str] = params
 
@@ -1745,7 +1748,7 @@ def convert_any_to_vw(source, format, output_filename, columnspec, named_labels,
 
     workers = _workers(workers)
     # XXX do os.stat on the source and decide on number of workers based on file size (e.g. less than 50k per worker does not make much sense)
-    batches, total_lines = split_file(source, nfolds=workers, ignoreheader=ignoreheader, log_level=-1)
+    batches, total_lines = split_file(source, nfolds=workers, ignoreheader=ignoreheader, importance=-1)
 
     batches_out = [x + '.out' for x in batches]
 
@@ -1771,7 +1774,7 @@ def convert_any_to_vw(source, format, output_filename, columnspec, named_labels,
             cmd = common_cmd + ['--tovw_simple', batch + '.out', '-d', batch]
             commands.append({'args': ' '.join(cmd)})
 
-        success, outputs = run_subprocesses(commands, workers=workers, log_level=-1)
+        success, outputs = run_subprocesses(commands, workers=workers, importance=-1)
         if not success:
             sys.exit(1)
 
@@ -1779,7 +1782,7 @@ def convert_any_to_vw(source, format, output_filename, columnspec, named_labels,
         if output_filename:
             cmd += ' > %s' % output_filename
 
-        system(cmd, log_level=-1)
+        system(cmd, importance=-1)
 
     finally:
         unlink(*batches)
@@ -1839,7 +1842,7 @@ def calculate_or_extract_score(metric, y_true, y_pred, config, outputs):
             return extract_score(metric, outputs)
         return calculate_score(metric, y_true, y_pred, config)
     except Exception, ex:
-        if LOG_LEVEL <= 0:
+        if MINIMUM_LOG_IMPORTANCE <= 0:
             traceback.print_exc()
         return '%s: %s' % (type(ex).__name__, ex)
 
@@ -2027,14 +2030,14 @@ def main_tune(metric, config, filename, format, args, preprocessor_base, kfold, 
     already_done = {}
 
     preprocessor_variants = list(expand(args, only=Preprocessor.ALL_OPTIONS_DASHDASH))
-    log('Trying preprocessor variants: %s', pprint.pformat(preprocessor_variants), log_level=-1)
+    log('Trying preprocessor variants: %s', pprint.pformat(preprocessor_variants), importance=-1)
 
     for my_args in preprocessor_variants:
         preprocessor = Preprocessor.from_options(preprocessor_base + my_args)
         preprocessor_opts = ' '.join(preprocessor.to_options() if preprocessor else [])
 
         if len(preprocessor_variants) != 1 or preprocessor_opts:
-            log('vwoptimize preprocessor = %s', preprocessor_opts, log_level=1)
+            log('vwoptimize preprocessor = %s', preprocessor_opts, importance=1)
 
         previously_done = already_done.get(str(preprocessor))
 
@@ -2471,7 +2474,7 @@ def main(to_cleanup):
 
     options, args = parser.parse_args()
 
-    globals()['LOG_LEVEL'] += options.lesslogs - options.morelogs + (args.count('--quiet'))
+    globals()['MINIMUM_LOG_IMPORTANCE'] += options.lesslogs - options.morelogs + args.count('--quiet')
     globals()['KEEPTMP'] = options.keeptmp
     globals()['METRIC_FORMAT'] = options.metricformat or METRIC_FORMAT
 
@@ -2515,7 +2518,7 @@ def main(to_cleanup):
 
     if options.readconfig:
         config = json.load(open(options.readconfig))
-        log('vwoptimize config = %s', options.readconfig, log_level=1)
+        log('vwoptimize config = %s', options.readconfig, importance=1)
 
         if 'regressor' in config and options.initial_regressor is None:
             options.initial_regressor = os.path.normpath(os.path.join(os.path.dirname(options.readconfig), config['regressor']))
@@ -2559,7 +2562,7 @@ def main(to_cleanup):
 
     if preprocessor_from_options:
         if config.get('preprocessor'):
-            log('Preprocessor specified in config (%s) and on command line (%s), going with the latter.', config['preprocessor'], preprocessor_from_options, log_level=2)
+            log_always('Preprocessor specified in config (%s) and on command line (%s), going with the latter.', config['preprocessor'], preprocessor_from_options)
         config['preprocessor'] = str(preprocessor_from_options)
         preprocessor = preprocessor_from_options
     elif config.get('preprocessor'):
@@ -2802,7 +2805,7 @@ def main(to_cleanup):
 
     config_tmp_filename = None
     if options.writeconfig:
-        log('write config = %s', options.writeconfig, log_level=1)
+        log('write config = %s', options.writeconfig, importance=1)
         assert options.writeconfig != options.final_regressor, options.writeconfig
 
         if final_regressor:
@@ -2858,9 +2861,9 @@ def main(to_cleanup):
             # don't want to capture stderr here, so vw_ metrics don't work there
 
             if format == 'vw':
-                popen = Popen(vw_cmd, stdin=sys.stdin, log_level=1)
+                popen = Popen(vw_cmd, stdin=sys.stdin, importance=1)
             else:
-                popen = Popen(vw_cmd, stdin=subprocess.PIPE, log_level=1)
+                popen = Popen(vw_cmd, stdin=subprocess.PIPE, importance=1)
                 for row in open_anything(sys.stdin, format, ignoreheader=options.ignoreheader, force_unbuffered=options.linemode):
                     # XXX weights
                     line = convert_row_to_vw(row, columnspec=config.get('columnspec'), preprocessor=preprocessor, weights=None, named_labels=config.get('named_labels'))
