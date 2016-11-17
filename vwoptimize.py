@@ -1338,7 +1338,7 @@ def chinese_simplify(unistr, cache={}):
 
 
 class Preprocessor(object):
-    ALL_OPTIONS = 'htmlunescape lowercase strip_punct stem split_chars split_ideographs chinese_simplify'.split()
+    ALL_OPTIONS = 'htmlunescape lowercase strip_punct stem split_chars split_ideographs split_hangul split_hiragana split_katakana chinese_simplify NFKC'.split()
     ALL_OPTIONS_DASHDASH = ['--%s' % x for x in ALL_OPTIONS]
 
     @classmethod
@@ -1371,19 +1371,19 @@ class Preprocessor(object):
     def to_options(self):
         return ['--%s' % opt for opt in self.ALL_OPTIONS if getattr(self, opt, None)]
 
-    def __init__(self, htmlunescape=False, lowercase=False, strip_punct=False, stem=False, split_chars=False, split_ideographs=False, chinese_simplify=False, normalize_space=True, **ignored):
-        self.normalize_space = normalize_space
-        self.htmlunescape = htmlunescape
-        self.lowercase = lowercase
-        self.strip_punct = strip_punct
-        self.stem = stem
-        self.split_chars = split_chars
-        self.split_ideographs = split_ideographs
-        self.chinese_simplify = chinese_simplify
+    def __init__(self, **kwargs):
+        for option in self.ALL_OPTIONS:
+            if option in kwargs:
+                setattr(self, option, kwargs[option])
         if self.stem:
             stem_words(["testing"])
             self.lowercase = True
             self.strip_punct = True
+        if self.split_chars:
+            self.split_ideographs = False
+            self.split_hangul = False
+            self.split_hiragana = False
+            self.split_katakana = False
 
     def __str__(self):
         return ' '.join(self.to_options())
@@ -1403,6 +1403,9 @@ class Preprocessor(object):
             if self.htmlunescape:
                 text = htmlparser_unescape(text)
 
+            if self.NFKC:
+                text = unicodedata.normalize('NFKC', text)
+
             if self.lowercase:
                 text = text.lower()
 
@@ -1420,16 +1423,26 @@ class Preprocessor(object):
             if self.split_chars:
                 words = [' '.join(w) for w in words]
                 text = u' __ '.join(words)
-            elif self.split_ideographs:
+            elif self.split_ideographs or self.split_hangul or self.split_hiragana or self.split_katakana:
                 newsplit = []
                 for char in u' '.join(words):
+                    do_split = False
                     try:
                         name = unicodedata.name(char)
                     except ValueError:
                         # log_always(u"%r %s: %s", char, char, ex)
                         # unicodedata.name fails with ValueError for smileys
-                        name = 'IDEOGRAPH'
-                    if 'IDEOGRAPH' in name:
+                        do_split = True
+                    else:
+                        if self.split_ideographs and 'IDEOGRAPH' in name:
+                            do_split = True
+                        elif self.split_hangul and 'HANGUL' in name:
+                            do_split = True
+                        elif self.split_hiragana and 'HIRAGANA' in name:
+                            do_split = True
+                        elif self.split_katakana and 'KATAKANA' in name:
+                            do_split = True
+                    if do_split:
                         newsplit.append(u' ' + char + u' ')
                     else:
                         newsplit.append(char)
