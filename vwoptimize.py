@@ -24,6 +24,7 @@ import numpy as np
 csv.field_size_limit(10000000)
 LOG_LEVEL = 1
 TMPID = str(os.getpid())
+TMP_PREFIX = None
 KEEPTMP = False
 STDIN_NAMES = ('/dev/stdin', '-')
 STDOUT_NAMES = ('/dev/stdout', 'stdout')
@@ -43,19 +44,6 @@ if 'darwin' in sys.platform:
     FOLDSCRIPT = 'perl'
 else:
     FOLDSCRIPT = 'awk'
-
-
-for path in '.vwoptimize /tmp/vwoptimize'.split():
-    if os.path.exists(path):
-        TMP_PREFIX = path
-        break
-    try:
-        os.mkdir(path)
-    except Exception, ex:
-        sys.stderr.write('Failed to create %r: %s\n' % (path, ex))
-    else:
-        TMP_PREFIX = path
-        break
 
 
 def htmlparser_unescape(text, cache=[]):
@@ -135,6 +123,7 @@ def get_real_ext(filename):
 
 def get_temp_filename(suffix, counter=[0]):
     counter[0] += 1
+    assert TMP_PREFIX
     fname = '%s/%s.%s.%s' % (TMP_PREFIX, TMPID, counter[0], suffix)
     assert not os.path.exists(fname), 'internal error: %s' % fname
     return fname
@@ -2394,6 +2383,7 @@ def main(to_cleanup):
     parser.add_option('--feature_mask_retrain_args')
 
     parser.add_option('--tmpid')
+    parser.add_option('--tmp', default='.vwoptimize /tmp/vwoptimize')
     parser.add_option('--foldscript')
 
     options, args = parser.parse_args()
@@ -2401,6 +2391,26 @@ def main(to_cleanup):
     globals()['LOG_LEVEL'] += options.lesslogs - options.morelogs + (args.count('--quiet'))
     globals()['KEEPTMP'] = options.keeptmp
     globals()['METRIC_FORMAT'] = options.metricformat or METRIC_FORMAT
+
+    tmp_prefix = None
+    tmp_options = options.tmp.split()
+
+    for path in tmp_options:
+        if os.path.exists(path):
+            tmp_prefix = path
+            break
+        try:
+            os.mkdir(path)
+        except Exception, ex:
+            sys.stderr.write('Failed to create %r: %s\n' % (path, ex))
+        else:
+            tmp_prefix = path
+            break
+
+    if not tmp_prefix:
+        sys.exit('Please specify location for temp files with --tmp' % tmp_options)
+
+    globals()['TMP_PREFIX'] = tmp_prefix
 
     if options.tmpid:
         globals()['TMPID'] = options.tmpid
