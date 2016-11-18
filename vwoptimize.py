@@ -2404,8 +2404,6 @@ def log_report(prefix, metrics, breakdown_re, breakdown_top, y_true, y_pred, y_p
 
 def main(to_cleanup):
     if '--parseaudit' in sys.argv:
-        parser = optparse.OptionParser()
-        parser.add_option('--parseaudit', action='store_true')
         if sys.argv[1:] != ['--parseaudit']:
             sys.exit('Unexpected arguments with --parseaudit: %r' % sys.argv[1:])
         parseaudit(sys.stdin)
