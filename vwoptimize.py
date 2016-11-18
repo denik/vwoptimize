@@ -2046,39 +2046,45 @@ def main_tune(metric, config, filename, format, args, preprocessor_base, kfold, 
 
         already_done[str(preprocessor)] = preprocessor_opts
 
-        if format == 'vw':
-            assert isinstance(filename, basestring), filename
-            vw_filename = filename
+        to_cleanup = []
 
-            if preprocessor:
-                sys.exit('Preprocessing not supported for vw format')
+        try:
 
-        else:
-            vw_filename = get_temp_filename('vw_filename')
-            to_cleanup.append(vw_filename)
-            convert_any_to_vw(
-                source=filename,
-                format=format,
-                output_filename=vw_filename,
-                columnspec=config.get('columnspec'),
-                named_labels=config.get('named_labels'),
-                weights=config.get('weights'),
-                preprocessor=preprocessor_opts,
-                ignoreheader=ignoreheader,
-                workers=workers)
+            if format == 'vw':
+                assert isinstance(filename, basestring), filename
+                vw_filename = filename
 
-        vw_args = [x for x in my_args if x not in Preprocessor.ALL_OPTIONS_DASHDASH]
+                if preprocessor:
+                    sys.exit('Preprocessing not supported for vw format')
 
-        this_best_result, this_best_options = vw_optimize_over_cv(
-            vw_filename,
-            kfold,
-            vw_args,
-            optimization_metric,
-            config,
-            workers=workers,
-            other_metrics=other_metrics,
-            feature_mask_retrain=feature_mask_retrain,
-            show_num_features=show_num_features)
+            else:
+                vw_filename = get_temp_filename('vw_filename')
+                to_cleanup.append(vw_filename)
+                convert_any_to_vw(
+                    source=filename,
+                    format=format,
+                    output_filename=vw_filename,
+                    columnspec=config.get('columnspec'),
+                    named_labels=config.get('named_labels'),
+                    weights=config.get('weights'),
+                    preprocessor=preprocessor_opts,
+                    ignoreheader=ignoreheader,
+                    workers=workers)
+
+            vw_args = [x for x in my_args if x not in Preprocessor.ALL_OPTIONS_DASHDASH]
+
+            this_best_result, this_best_options = vw_optimize_over_cv(
+                vw_filename,
+                kfold,
+                vw_args,
+                optimization_metric,
+                config,
+                workers=workers,
+                other_metrics=other_metrics,
+                feature_mask_retrain=feature_mask_retrain,
+                show_num_features=show_num_features)
+        finally:
+            unlink(*to_cleanup)
 
         is_best = ''
         if this_best_result is not None and (best_result is None or this_best_result < best_result):
@@ -2915,8 +2921,8 @@ def main(to_cleanup):
 
 
 if __name__ == '__main__':
-    to_cleanup = []
+    TO_CLEANUP = []
     try:
-        main(to_cleanup)
+        main(TO_CLEANUP)
     finally:
-        unlink(*to_cleanup)
+        unlink(*TO_CLEANUP)
