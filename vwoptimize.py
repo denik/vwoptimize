@@ -2409,6 +2409,10 @@ def main(to_cleanup):
         parseaudit(sys.stdin)
         sys.exit(0)
 
+    if '--version' in sys.argv:
+        log_always("%s %s", __file__, __version__)
+        sys.exit(0)
+
     if '--report' in sys.argv or '--tovw' in sys.argv or '--tovw_simple' in sys.argv:
         parser = optparse.OptionParser()
     else:
