@@ -2119,7 +2119,7 @@ def format_item(counts, weight, hash, ignore_single=None):
     return '%g %s' % (weight, top_items)
 
 
-def parseaudit(source):
+def parseaudit(source, includezeros=False):
     weights = {}
     counts = {}  # hash -> text -> count
     line = None
@@ -2146,7 +2146,7 @@ def parseaudit(source):
             weight = weight.split('@')[0]
             weight = float(weight)
 
-            if not weight:
+            if not weight and not includezeros:
                 continue
 
             example_features[hash] = text
@@ -2404,9 +2404,13 @@ def log_report(prefix, metrics, breakdown_re, breakdown_top, y_true, y_pred, y_p
 
 def main(to_cleanup):
     if '--parseaudit' in sys.argv:
-        if sys.argv[1:] != ['--parseaudit']:
-            sys.exit('Unexpected arguments with --parseaudit: %r' % sys.argv[1:])
-        parseaudit(sys.stdin)
+        parser = optparse.OptionParser()
+        parser.add_option('--parseaudit', action='store_true')
+        parser.add_option('--includezeros', action='store_true')
+        options, args = parser.parse_args()
+        if args:
+            sys.exit('Unexpected arguments with --parseaudit: %r' % args)
+        parseaudit(sys.stdin, includezeros=options.includezeros)
         sys.exit(0)
 
     if '--version' in sys.argv:
