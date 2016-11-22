@@ -2107,11 +2107,8 @@ def main_tune(metric, config, filename, format, args, preprocessor_base, kfold, 
     return best_vw_options, preprocessor
 
 
-def format_item(counts, weight, hash, ignore_single=None):
-    if ignore_single:
-        top_items = [(v, k) for (k, v) in counts[hash].items() if v > 1]
-    else:
-        top_items = [(v, k) for (k, v) in counts[hash].items()]
+def format_item(counts, weight, hash):
+    top_items = [(v, k) for (k, v) in counts[hash].items()]
     if not top_items:
         return
     top_items.sort(reverse=True)
