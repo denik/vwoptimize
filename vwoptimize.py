@@ -1167,7 +1167,11 @@ def vw_optimize_over_cv(vw_filename, kfold, args, metric, config,
             sys.exit('Cannot calculate %r: %s' % (metric, result))
 
         if isinstance(result, list):
-            result = np.mean(result)
+            try:
+                result, suffix = mean_h(result)
+            except Exception:
+                log_always("Failed to calculate mean from %r", result)
+                raise
 
         if not isinstance(result, (int, long, float)):
             sys.exit('Bad metric for tuning: %s (value=%r)' % (metric, result))
