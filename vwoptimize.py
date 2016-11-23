@@ -2109,11 +2109,12 @@ def main_tune(metric, config, filename, format, args, preprocessor_base, kfold, 
 
 def format_item(counts, weight, hash):
     top_items = [(v, k) for (k, v) in counts[hash].items()]
+    count = len(top_items)
     if not top_items:
-        return
+        return None, count
     top_items.sort(reverse=True)
     top_items = ', '.join('%s %s' % (k, v) for (v, k) in top_items)
-    return '%g %s' % (weight, top_items)
+    return '%g %s' % (weight, top_items), count
 
 
 def parseaudit(source, includezeros=False):
@@ -2164,13 +2165,19 @@ def parseaudit(source, includezeros=False):
     weights = [(w, hash) for (hash, w) in weights.iteritems()]
     weights.sort(reverse=True)
 
+    total_count = 0
+
     try:
         for w, hash in weights:
-            item = format_item(counts, w, hash)
+            item, count = format_item(counts, w, hash)
             if item:
                 print item
-    except IOError, ex:
-        sys.exit(str(ex))
+            total_count += count
+    except IOError:
+        # likely because we're being piped into head or tail
+        pass
+
+    log("Unique%s features: %s", '' if includezeros else ' non-zero', total_count, importance=1)
 
 
 def mean_h(values):
