@@ -2339,7 +2339,24 @@ def log_report_one(prefix, metrics, y_true, y_pred, config, classification_repor
         log_classification_report(prefix, y_true, y_pred, labels=config.get('named_labels'), threshold=config.get('threshold'))  # XXX sample_weight
 
 
-def log_report(prefix, metrics, breakdown_re, breakdown_top, y_true, y_pred, y_pred_text, config, classification_report, outputs=None):
+def _parse_number_or_fraction(x):
+    if x is None or x == '':
+        return None
+    if '%' in x:
+        return float(x.rstrip('%')) / 100.0
+    if '.' in x:
+        return float(x)
+    return int(x)
+
+
+def parse_number_or_fraction(x, total=None):
+    x = _parse_number_or_fraction(x)
+    if total is not None and isinstance(x, float):
+        return int(round(x * total))
+    return x
+
+
+def log_report(prefix, metrics, breakdown_re, breakdown_top, breakdown_min, y_true, y_pred, y_pred_text, config, classification_report, outputs=None):
     log_report_one(prefix, metrics, y_true, y_pred, config, classification_report, outputs=outputs)
 
     if breakdown_top and not breakdown_re:
@@ -2356,34 +2373,36 @@ def log_report(prefix, metrics, breakdown_re, breakdown_top, y_true, y_pred, y_p
         group = get_breakdown_group(breakdown_re, item)
         breakdown_counts[group] = 1 + breakdown_counts.get(group, 0)
 
-    breakdown_counts = [(-v, k == 'nomatch', k) for (k, v) in breakdown_counts.items()]
-    breakdown_counts.sort()
+    breakdown_counts = breakdown_counts.items()
+    breakdown_counts.sort(key=lambda (key, count): (-count, key == 'nomatch', key))
+
+    total_count = len(y_pred_text)
 
     print_rest = False
+    breakdown_top = parse_number_or_fraction(breakdown_top)
+    breakdown_min = parse_number_or_fraction(breakdown_min, total_count)
+    original_number_of_groups = len(breakdown_counts)
 
-    if breakdown_top:
-        if '%' in breakdown_top:
-            breakdown_top = float(breakdown_top.rstrip('%')) / 100.0
-        elif '.' in breakdown_top:
-            breakdown_top = float(breakdown_top)
-        else:
-            breakdown_top = int(breakdown_top)
+    if breakdown_min:
+        breakdown_counts = [x for x in breakdown_counts if x[-1] >= breakdown_min]
 
-        if isinstance(breakdown_top, float):
-            total_count = 0
-            n_items = 0
-            for count, _a, _b in breakdown_counts:
-                total_count += abs(count)
-                n_items += 1
-                if total_count / float(len(y_pred_text)) >= breakdown_top:
-                    break
-            breakdown_top = n_items
+    if breakdown_top and isinstance(breakdown_top, int):
+        breakdown_counts = breakdown_counts[:breakdown_top]
+    elif breakdown_top and isinstance(breakdown_top, float):
+        max_count = round(breakdown_top * total_count)
+        result = []
+        top_count = 0
+        for item in breakdown_counts:
+            result.append(item)
+            top_count += item[-1]
+            if top_count >= max_count:
+                break
+        breakdown_counts = result
 
-        if breakdown_top and breakdown_top < len(breakdown_counts):
-            print_rest = True
-            breakdown_counts = breakdown_counts[:breakdown_top]
+    if len(breakdown_counts) != original_number_of_groups:
+        print_rest = True
 
-    groups = [x[-1] for x in breakdown_counts]
+    groups = [x[0] for x in breakdown_counts]
 
     indices = {}
     for group in groups:
@@ -2475,6 +2494,7 @@ def main(to_cleanup):
     parser.add_option('--classification_report', action='store_true')
     parser.add_option('--breakdown')
     parser.add_option('--breakdown_top')
+    parser.add_option('--breakdown_min')
 
     # logging and debugging and misc
     parser.add_option('--morelogs', action='count', default=0)
@@ -2707,6 +2727,7 @@ def main(to_cleanup):
                    metrics=options.metric,
                    breakdown_re=options.breakdown,
                    breakdown_top=options.breakdown_top,
+                   breakdown_min=options.breakdown_min,
                    y_true=y_true,
                    y_pred=y_pred,
                    y_pred_text=y_pred_text,
@@ -2798,6 +2819,7 @@ def main(to_cleanup):
                    metrics=options.metric or DEFAULT_METRICS,
                    breakdown_re=options.breakdown,
                    breakdown_top=options.breakdown_top,
+                   breakdown_min=options.breakdown_min,
                    y_true=y_true,
                    y_pred=cv_pred,
                    y_pred_text=cv_pred_text,
@@ -2917,6 +2939,7 @@ def main(to_cleanup):
                    metrics=options.metric,
                    breakdown_re=options.breakdown,
                    breakdown_top=options.breakdown_top,
+                   breakdown_min=options.breakdown_min,
                    y_true=y_true,
                    y_pred=y_pred,
                    y_pred_text=y_pred_text,

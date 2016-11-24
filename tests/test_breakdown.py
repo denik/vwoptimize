@@ -114,6 +114,29 @@ breakdown  third_house acc = 0
 breakdown  third_house count = 1
 breakdown rest acc = 1
 breakdown rest count = 1
+
+[breakdown_min_too_high]
+$ vwoptimize.py -d simple.vw --metric acc,count --quiet --breakdown_min 2
+(0)acc = 0.333333
+count = 3
+
+[breakdown_min_int]
+$ vwoptimize.py -d simple.vw --metric acc,count --quiet --breakdown_min 2 --breakdown house
+(0)acc = 0.333333
+count = 3
+breakdown house acc = 0
+breakdown house count = 2
+breakdown rest acc = 1
+breakdown rest count = 1
+
+[breakdown_min_percent]
+$ vwoptimize.py -d simple.vw --metric acc,count --quiet --breakdown_min 50% --breakdown house
+(0)acc = 0.333333
+count = 3
+breakdown house acc = 0
+breakdown house count = 2
+breakdown rest acc = 1
+breakdown rest count = 1
 """
 
 import sys
