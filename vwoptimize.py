@@ -2773,6 +2773,8 @@ def main(to_cleanup):
                 ignoreheader=options.ignoreheader,
                 workers=options.workers)
 
+    reported = False
+
     if options.kfold and not need_tuning:
         # QQQ --initial_regressor is not passed there
         # XXX we could skip --cv here if we make main_tune() keep final predictions and raw_predictions for us
@@ -2820,6 +2822,8 @@ def main(to_cleanup):
         options.raw_predictions = None
         options.toperror = None
 
+        reported = True
+
     final_regressor = options.final_regressor
 
     config_tmp_filename = None
@@ -2844,7 +2848,7 @@ def main(to_cleanup):
         final_regressor_tmp = final_regressor + '.tmp'
         to_cleanup.append(final_regressor_tmp)
 
-    if final_regressor_tmp or not (options.kfold or need_tuning):
+    if not reported:
         my_args = vw_args
 
         predictions_fname = options.predictions
