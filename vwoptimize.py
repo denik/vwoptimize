@@ -2875,7 +2875,7 @@ def main(to_cleanup):
         final_regressor_tmp = final_regressor + '.tmp'
         to_cleanup.append(final_regressor_tmp)
 
-    if not reported:
+    if not reported or final_regressor_tmp:
         my_args = vw_args
 
         predictions_fname = options.predictions
