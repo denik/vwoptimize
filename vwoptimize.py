@@ -2077,14 +2077,10 @@ def main_tune(metric, config, filename, format, y_true, args, preprocessor_base,
         to_cleanup = []
 
         try:
+            weight_train = config.get('weight_train')
 
-            if format == 'vw':
-                assert isinstance(filename, basestring), filename
+            if format == 'vw' and not weight_train and not preprocessor:
                 vw_filename = filename
-
-                if preprocessor:
-                    sys.exit('Preprocessing not supported for vw format')
-
             else:
                 vw_filename = get_temp_filename('vw_filename')
                 to_cleanup.append(vw_filename)
@@ -2094,7 +2090,7 @@ def main_tune(metric, config, filename, format, y_true, args, preprocessor_base,
                     output_filename=vw_filename,
                     columnspec=config.get('columnspec'),
                     named_labels=config.get('named_labels'),
-                    weights=config.get('weights'),
+                    weights=weight_train,
                     preprocessor=preprocessor_opts,
                     ignoreheader=ignoreheader,
                     workers=workers)
@@ -2800,9 +2796,10 @@ def main(to_cleanup):
 
     vw_filename = None
 
+    weight_train = config.get('weight_train')
+
     if filename:
-        if format == 'vw':
-            assert not preprocessor or not preprocessor.to_options(), preprocessor
+        if format == 'vw' and not weight_train and not preprocessor:
             vw_filename = filename
         else:
             vw_filename = get_temp_filename('vw')
@@ -2815,7 +2812,7 @@ def main(to_cleanup):
                 preprocessor=config.get('preprocessor'),
                 columnspec=config.get('columnspec'),
                 named_labels=config.get('named_labels'),
-                weights=config.get('weight_train'),
+                weights=weight_train,
                 ignoreheader=options.ignoreheader,
                 workers=options.workers)
 
@@ -2930,9 +2927,9 @@ def main(to_cleanup):
 
             # don't want to capture stderr here, so vw_ metrics don't work there
 
-            weights = config.get('weight_train')
+            weight_train = config.get('weight_train')
 
-            if format == 'vw' and not weights and not preprocessor:
+            if format == 'vw' and not weight_train and not preprocessor:
                 popen = Popen(vw_cmd, stdin=sys.stdin, importance=1)
             else:
                 log('preprocessor = %s', preprocessor, importance=1 if preprocessor else 0)
@@ -2942,7 +2939,7 @@ def main(to_cleanup):
                         row,
                         columnspec=config.get('columnspec'),
                         preprocessor=preprocessor,
-                        weights=weights,
+                        weights=weight_train,
                         named_labels=config.get('named_labels'))
                     popen.stdin.write(line)
                     # subprocess.Popen is unbuffered by default

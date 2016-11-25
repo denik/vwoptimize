@@ -66,6 +66,26 @@ $ echo '1,hello' | vwoptimize.py --weight 1:10 --format csv 2>&1 | grep weighted
 weighted example sum = 10.000000
 weighted label sum = 10.000000
 
+[weight_vw_run_file]
+$ vwoptimize.py -d iris.vw --weight 1:10 2>&1 | grep weighted
+weighted example sum = 600.000000
+weighted label sum = 750.000000
+
+[weight_csv_run_file]
+$ vwoptimize.py -d simple.csv --weight 2:2 2>&1 | grep weighted
+weighted example sum = 4.000000
+weighted label sum = 6.000000
+
+[weight_vw_run_opt]
+$ vwoptimize.py -d iris.vw --weight 1:10 -b 10/20? 2>&1 | grep weighted
+weighted example sum = 600.000000
+weighted label sum = 750.000000
+
+[weight_csv_run_opt]
+$ vwoptimize.py -d simple.csv --weight 2:2 -b 10/20? 2>&1 | grep weighted
+weighted example sum = 4.000000
+weighted label sum = 6.000000
+
 [cleanup]
 $ ls .vwoptimize
 <BLANKLINE>
