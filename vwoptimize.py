@@ -1867,11 +1867,16 @@ def _get_stage(metric):
 
 
 def extract_score(metric, outputs):
+    if not outputs:
+        raise ValueError('error: No output captured from vw')
+
+    orig_outputs = outputs
+
     stage, metric = _parse_vw_metric(metric)
     outputs = (outputs or {}).get(stage)
 
     if not outputs:
-        raise ValueError('error: No output for stage %r' % stage)
+        raise ValueError('error: No output for stage %r. Available: %r' % (stage, ', '.join(orig_outputs.keys())))
 
     values = [x.get(metric) for x in outputs]
 
