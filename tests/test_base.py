@@ -169,42 +169,6 @@ $ cat tmp_y_true | vwoptimize.py --format csv --report -p tmp_y_pred --metric ac
 $ cat tmp_y_pred | vwoptimize.py --format csv --report -p /dev/stdin -d tmp_y_true --metric acc
 (0)acc = 0.75
 
-[tovw]
-$ vwoptimize.py -d simple.csv --tovw /dev/stdout
-1 | Hello World! first class
-2 | Goodbye World. second class
-1 | hello first class again
-
-[tovw__weight]
-$ vwoptimize.py -d simple.csv --tovw /dev/stdout --weight 1:0.5
-1 0.5 | Hello World! first class
-2 | Goodbye World. second class
-1 0.5 | hello first class again
-
-[tovw__weight_train]
-$ vwoptimize.py -d simple.csv --tovw /dev/stdout --weight_train 1:0.5
-1 0.5 | Hello World! first class
-2 | Goodbye World. second class
-1 0.5 | hello first class again
-
-[tovw__weight_metric]
-$ vwoptimize.py -d simple.csv --tovw /dev/stdout --weight_metric 1:0.5
-1 | Hello World! first class
-2 | Goodbye World. second class
-1 | hello first class again
-
-[named_labels1]
-$ vwoptimize.py -d text_labels.csv --tovw /dev/stdout --named_labels welcome,bye --weight welcome:0.5
-welcome 0.5 | Hello World!
-bye | Goodbye World.
-welcome 0.5 | hello
-
-[named_labels2]
-$ vwoptimize.py -d text_labels.csv --tovw /dev/stdout --named_labels welcome,bye
-welcome | Hello World!
-bye | Goodbye World.
-welcome | hello
-
 [kfold25]
 $ vwoptimize.py -d iris.vw --metric vw_train_weighted_example_sum,vw_average_loss --oaa 3 --kfold 25
 (0)25-fold vw_train_weighted_example_sum = 144

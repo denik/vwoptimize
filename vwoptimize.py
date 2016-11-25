@@ -183,20 +183,6 @@ def get_format_from_filename(filename):
             return ext
 
 
-def _read_lines_vw(fobj):
-    for orig_line in fobj:
-        if not orig_line.strip():
-            continue
-        items = orig_line.split('|')
-        if len(items) <= 1:
-            sys.exit('Bad line: %r' % (orig_line, ))
-        prefix_items = items[0].strip().split()
-        if not prefix_items or not prefix_items or prefix_items[0].startswith("'"):
-            yield (None, orig_line)
-        else:
-            yield (prefix_items[0], orig_line)
-
-
 def open_anything(source, format, ignoreheader, force_unbuffered=False):
     source = open_regular_or_compressed(source)
 
@@ -205,7 +191,7 @@ def open_anything(source, format, ignoreheader, force_unbuffered=False):
         source = iter(source.readline, '')
 
     if format == 'vw':
-        return _read_lines_vw(source)
+        return source
 
     if format == 'tsv':
         reader = csv.reader(source, csv.excel_tab)
@@ -753,7 +739,7 @@ def parse_vw_output(output):
     return result
 
 
-def _load_labels(file, size=None, with_text=False, named_labels=None):
+def _load_predictions(file, size=None, with_text=False, named_labels=None):
     filename = file
     if isinstance(file, list):
         filename = file
@@ -1086,7 +1072,7 @@ def get_tuning_config(config):
     return type(**params)
 
 
-def vw_optimize_over_cv(vw_filename, kfold, args, metric, config,
+def vw_optimize_over_cv(vw_filename, y_true, kfold, args, metric, config,
                         workers=None, other_metrics=[],
                         feature_mask_retrain=False, show_num_features=False):
     # we only depend on scipy if parameter tuning is enabled
@@ -1111,11 +1097,6 @@ def vw_optimize_over_cv(vw_filename, kfold, args, metric, config,
 
     calculated_metrics = [x for x in [metric] + other_metrics if not x.startswith('vw')]
     vw_metrics = [x for x in [metric] + other_metrics if x.startswith('vw')]
-
-    if calculated_metrics:
-        y_true = _load_labels(vw_filename)  # XXX named_labels
-    else:
-        y_true = None
 
     def run(params):
         log('Parameters: %r', params)
@@ -1153,6 +1134,8 @@ def vw_optimize_over_cv(vw_filename, kfold, args, metric, config,
             cache[args] = 0.0
             return 0.0
 
+        y_pred = None
+
         if y_true is not None:
             if calculated_metrics and len(y_true) != len(y_pred_text):
                 sys.exit('Internal error: expected %r predictions, got %r' % (len(y_true), len(y_pred_text)))
@@ -1160,7 +1143,8 @@ def vw_optimize_over_cv(vw_filename, kfold, args, metric, config,
             if raw_pred_text and len(y_true) != len(raw_pred_text):
                 sys.exit('Internal error: expected %r raw predictions, got %r' % (len(y_true), len(raw_pred_text)))
 
-        y_pred = _load_labels(y_pred_text)  # XXX named_labels
+            y_pred = _load_predictions(y_pred_text, size=len(y_true), named_labels=config.get('named_labels'))
+
         result = calculate_or_extract_score(metric, y_true, y_pred, config, outputs)
 
         if isinstance(result, basestring):
@@ -1544,23 +1528,24 @@ class Preprocessor(object):
 
 def read_y_true(filename, format, columnspec, ignoreheader, named_labels):
     log('Reading labels from %s', filename or 'stdin')
+    if format == 'vw':
+        return _load_predictions(filename, named_labels=named_labels)
+
     rows_source = open_anything(filename, format, ignoreheader=ignoreheader)
 
-    if format == 'vw':
-        label_index = 0
-    else:
-        label_index = columnspec.index('y')
+    label_index = columnspec.index('y')
 
     y_true = []
 
     for row in rows_source:
         label = row[label_index]
-        if named_labels is not None and label not in named_labels:
+        if named_labels is None:
+            label = float(label)
+        elif label not in named_labels:
             sys.exit('Unexpected label in %s: %r (allowed: %s)' % (filename, label, named_labels))
         y_true.append(label)
 
-    if not named_labels:
-        y_true = _load_labels(y_true)
+    y_true = np.array(y_true)
 
     return y_true
 
@@ -1593,7 +1578,7 @@ def proper_label(s):
 def parse_weight(config, named_labels=None):
     """
     >>> parse_weight('A:B:2', ['A:B', 'another_label'])
-    {'A:B': 2.0}
+    {'A:B': '2'}
 
     >>> parse_weight('A:B:2')
     Traceback (most recent call last):
@@ -1620,7 +1605,7 @@ def parse_weight(config, named_labels=None):
 
         if named_labels is None:
             try:
-                label = float(label)
+                float(label)
             except Exception:
                 sys.exit('Weight must be specified as CLASS(float):WEIGHT, %r not recognized' % (label, ))
         else:
@@ -1628,7 +1613,7 @@ def parse_weight(config, named_labels=None):
                 sys.exit('Label %r is not recognized. Expected: %r' % (label, named_labels))
 
         try:
-            weight = float(weight)
+            float(weight)
         except Exception:
             weight = None
 
@@ -1650,6 +1635,8 @@ def get_sample_weight(y_true, config):
     updated = np.zeros(N)
 
     for klass, weight in config.items():
+        klass = float(klass)
+        weight = float(weight)
         result += np.multiply(np.ones(N) * weight, y_true == klass)
         updated += y_true == klass
 
@@ -1669,6 +1656,29 @@ def process_text(preprocessor, text):
 
 
 def convert_row_to_vw(row, columnspec, preprocessor, weights, named_labels):
+    if isinstance(row, basestring):
+        if not row.strip():
+            return row
+        assert '|' in row, row
+        assert columnspec is None
+        if preprocessor is None and not weights:
+            return row
+        label, rest = row.split('|', 1)
+        if preprocessor is not None:
+            rest = preprocessor.process_text(rest)
+        if weights:
+            # XXX ignores existing weight
+            label_items = label.split(' ', 1)
+            y = label_items[0]
+
+            if named_labels is not None and y not in named_labels:
+                sys.exit('Label not recognized: %r' % (row, ))
+
+            weight = weights.get(y)
+            if weight is not None:
+                label = y + ' ' + str(weight) + ' ' + ' '.join(label_items[1:])
+        return label + '|' + rest
+
     assert isinstance(columnspec, list), columnspec
 
     if columnspec[-1] == '*':
@@ -1717,19 +1727,12 @@ def convert_row_to_vw(row, columnspec, preprocessor, weights, named_labels):
     else:
         info = ''
 
-    if named_labels is None:
-        if y:
-            weight_key = float(y)
-        else:
-            weight_key = y
-    else:
-        weight_key = y
-        if y not in named_labels:
-            sys.exit('Label not recognized: %r' % (row, ))
+    if named_labels is not None and y not in named_labels:
+        sys.exit('Label not recognized: %r' % (row, ))
 
     if weights is not None:
-        weight = weights.get(weight_key, 1)
-        if weight == 1:
+        weight = weights.get(y, '1')
+        if weight == '1':
             weight = ''
         else:
             weight = ' ' + str(weight)
@@ -1741,9 +1744,6 @@ def convert_row_to_vw(row, columnspec, preprocessor, weights, named_labels):
 
 
 def _convert_any_to_vw(source, format, output, weights, preprocessor, columnspec, named_labels, ignoreheader):
-    assert format != 'vw'
-    assert isinstance(columnspec, list)
-
     if named_labels is not None:
         assert not isinstance(named_labels, basestring)
         named_labels = set(named_labels)
@@ -1759,7 +1759,6 @@ def _convert_any_to_vw(source, format, output, weights, preprocessor, columnspec
 
 
 def convert_any_to_vw(source, format, output_filename, columnspec, named_labels, weights, preprocessor, ignoreheader, workers):
-    assert format != 'vw'
     preprocessor = preprocessor or ''
 
     assert isinstance(preprocessor, basestring), preprocessor
@@ -2043,7 +2042,7 @@ def classification_report(y_true, y_pred, labels=None, sample_weight=None, digit
     return results
 
 
-def main_tune(metric, config, filename, format, args, preprocessor_base, kfold, ignoreheader, workers, feature_mask_retrain, show_num_features):
+def main_tune(metric, config, filename, format, y_true, args, preprocessor_base, kfold, ignoreheader, workers, feature_mask_retrain, show_num_features):
     if preprocessor_base is None:
         preprocessor_base = []
     else:
@@ -2104,6 +2103,7 @@ def main_tune(metric, config, filename, format, args, preprocessor_base, kfold, 
 
             this_best_result, this_best_options = vw_optimize_over_cv(
                 vw_filename,
+                y_true,
                 kfold,
                 vw_args,
                 optimization_metric,
@@ -2653,7 +2653,7 @@ def main(to_cleanup):
 
     if options.columnspec:
         config['columnspec'] = _make_proper_list(options.columnspec)
-    elif 'columnspec' not in config:
+    elif 'columnspec' not in config and format != 'vw':
         config['columnspec'] = _make_proper_list(DEFAULT_COLUMNSPEC)
 
     config['format'] = format
@@ -2706,7 +2706,6 @@ def main(to_cleanup):
             flush_and_close(fobj)
 
     if options.tovw:
-        assert format != 'vw', 'Input should be csv or tsv'
         convert_any_to_vw(
             filename,
             format=format,
@@ -2746,7 +2745,7 @@ def main(to_cleanup):
             sys.exit('Must provide -p')
 
         assert y_true is not None
-        y_pred, y_pred_text = _load_labels(predictions, len(y_true), with_text=True, named_labels=config.get('named_labels'))
+        y_pred, y_pred_text = _load_predictions(predictions, len(y_true), with_text=True, named_labels=config.get('named_labels'))
 
         log_report(prefix='',
                    # vw_* metrics not supported here, but pass them anyway to let the caller now
@@ -2780,6 +2779,7 @@ def main(to_cleanup):
             config=config,
             filename=filename,
             format=format,
+            y_true=y_true,
             args=args,
             preprocessor_base=preprocessor,
             kfold=options.kfold,
@@ -2838,7 +2838,7 @@ def main(to_cleanup):
             calc_num_features=show_num_features,
             capture_output=set([_get_stage(m) for m in (vw_metrics or DEFAULT_METRICS)]))
 
-        cv_pred = _load_labels(cv_pred_text, named_labels=config.get('named_labels'))
+        cv_pred = _load_predictions(cv_pred_text, named_labels=config.get('named_labels'))
 
         log_report(prefix='%s-fold ' % options.kfold,
                    metrics=options.metric or DEFAULT_METRICS,
@@ -2930,14 +2930,20 @@ def main(to_cleanup):
 
             # don't want to capture stderr here, so vw_ metrics don't work there
 
-            if format == 'vw':
+            weights = config.get('weight_train')
+
+            if format == 'vw' and not weights and not preprocessor:
                 popen = Popen(vw_cmd, stdin=sys.stdin, importance=1)
             else:
                 log('preprocessor = %s', preprocessor, importance=1 if preprocessor else 0)
                 popen = Popen(vw_cmd, stdin=subprocess.PIPE, importance=1)
                 for row in open_anything(sys.stdin, format, ignoreheader=options.ignoreheader, force_unbuffered=options.linemode):
-                    # XXX weights
-                    line = convert_row_to_vw(row, columnspec=config.get('columnspec'), preprocessor=preprocessor, weights=None, named_labels=config.get('named_labels'))
+                    line = convert_row_to_vw(
+                        row,
+                        columnspec=config.get('columnspec'),
+                        preprocessor=preprocessor,
+                        weights=weights,
+                        named_labels=config.get('named_labels'))
                     popen.stdin.write(line)
                     # subprocess.Popen is unbuffered by default
                 popen.stdin.close()
@@ -2957,9 +2963,10 @@ def main(to_cleanup):
         if need_y_true_and_y_pred:
             assert predictions_fname is not None
             assert y_true is not None
-            y_pred, y_pred_text = _load_labels(predictions_fname, len(y_true), with_text=True, named_labels=config.get('named_labels'))
+            y_pred, y_pred_text = _load_predictions(predictions_fname, len(y_true), with_text=True, named_labels=config.get('named_labels'))
 
         # we don't support extracted metrics there because we don't capture stderr
+
         log_report(prefix='',
                    metrics=calculated_metrics,
                    breakdown_re=options.breakdown,
