@@ -2939,9 +2939,9 @@ def main(to_cleanup):
             assert y_true is not None
             y_pred, y_pred_text = _load_labels(predictions_fname, len(y_true), with_text=True, named_labels=config.get('named_labels'))
 
-        # we don't support extracted metrics there because we don't capture stderr. Pass them anyway, to let the user know.
+        # we don't support extracted metrics there because we don't capture stderr
         log_report(prefix='',
-                   metrics=options.metric,
+                   metrics=calculated_metrics,
                    breakdown_re=options.breakdown,
                    breakdown_top=options.breakdown_top,
                    breakdown_min=options.breakdown_min,
