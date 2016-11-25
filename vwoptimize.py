@@ -1658,6 +1658,16 @@ def get_sample_weight(y_true, config):
     return result
 
 
+def process_text(preprocessor, text):
+    if preprocessor is not None:
+        text = preprocessor.process_text(text)
+    else:
+        text = re.sub('\s+', ' ', text)
+    text = text.replace(':', ' ').replace('|', ' ')
+    text = text.strip()
+    return text
+
+
 def convert_row_to_vw(row, columnspec, preprocessor, weights, named_labels):
     assert isinstance(columnspec, list), columnspec
 
@@ -1672,11 +1682,29 @@ def convert_row_to_vw(row, columnspec, preprocessor, weights, named_labels):
     y = ''
     x = []
     info = []
+    last_namespace = None
+
     for item, spec in zip(row, columnspec):
         if spec == 'y':
             y = item
-        elif spec == 'text':
+        elif spec == 'text' or spec.startswith('text_'):
+            namespace = spec[5:]
+            if not x or namespace != last_namespace:
+                x.append('|' + namespace)
+            x.append(process_text(preprocessor, item))
+            if '|' in item:
+                last_namespace = None
+            else:
+                last_namespace = namespace
+        elif spec == 'vw' or spec.startswith('vw_'):
+            namespace = spec[3:]
+            if not item.startswith('|') and (not x or namespace != last_namespace):
+                x.append('|' + namespace)
             x.append(item)
+            if '|' in item:
+                last_namespace = None
+            else:
+                last_namespace = namespace
         elif spec == 'info':
             info.append(item)
         elif spec == 'drop' or not spec:
@@ -1704,19 +1732,11 @@ def convert_row_to_vw(row, columnspec, preprocessor, weights, named_labels):
         if weight == 1:
             weight = ''
         else:
-            weight = str(weight) + ' '
+            weight = ' ' + str(weight)
     else:
         weight = ''
 
-    if preprocessor:
-        x = preprocessor.process_row(x)
-        text = '  '.join(x)
-    else:
-        text = ' '.join(x)
-        text = re.sub('\s+', ' ', text)
-    text = text.replace(':', ' ').replace('|', ' ')
-    text = text.strip()
-    text = '%s %s%s| %s\n' % (y, weight, info, text)
+    text = y + weight + info + ' ' + ' '.join(x) + '\n'
     return text
 
 
