@@ -26,7 +26,7 @@ $ vwoptimize.py -d small_ag_news.csv --oaa 4 -b 20 --writeconfig tmp_config -f t
 
 [parseaudit1]
 $ vwoptimize.py --quiet -i tmp_model -t -a -d small_ag_news.csv | vwoptimize.py --parseaudit | head -n 2
-(0)[Errno 32] Broken pipe
+(0)Unique non-zero features: 1660
 0.0901711 his 5
 0.0761782 agreed 2
 
@@ -288,6 +288,7 @@ $ diff -u tmp_readable_model tmp_readable_model_after_cv
 
 [parseaudit2]
 $ vwoptimize.py --quiet -i tmp_vw_model -t -a -d iris.vw | vwoptimize.py --parseaudit | head -n 1
+(0)Unique non-zero features: 15
 0.0811443 3 150
 
 [progressive_validation_vw]
