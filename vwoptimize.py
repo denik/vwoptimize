@@ -2451,6 +2451,7 @@ def main(to_cleanup):
 
     if '--report' in sys.argv or '--tovw' in sys.argv or '--tovw_simple' in sys.argv:
         parser = optparse.OptionParser()
+        parser.add_option('--quiet', action='store_true')
     else:
         parser = PassThroughOptionParser()
 
@@ -2518,7 +2519,7 @@ def main(to_cleanup):
 
     options, args = parser.parse_args()
 
-    globals()['MINIMUM_LOG_IMPORTANCE'] += options.lesslogs - options.morelogs + args.count('--quiet')
+    globals()['MINIMUM_LOG_IMPORTANCE'] += options.lesslogs - options.morelogs + int(getattr(options, 'quiet', None) or 0) + args.count('--quiet')
     globals()['KEEPTMP'] = options.keeptmp
     globals()['METRIC_FORMAT'] = options.metricformat or METRIC_FORMAT
 
