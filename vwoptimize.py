@@ -2754,7 +2754,6 @@ def main(to_cleanup):
 
     if need_tuning:
         # QQQ --initial_regressor is not passed there
-        assert not options.audit, '-a incompatible with parameter tuning'
         vw_args, preprocessor = main_tune(
             metric=options.metric,
             config=config,
