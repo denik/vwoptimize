@@ -2194,16 +2194,17 @@ def parseaudit(source, includezeros=False):
     weights.sort(reverse=True)
 
     total_count = 0
+    printing = True
 
-    try:
-        for w, hash in weights:
-            item, count = format_item(counts, w, hash)
-            if item:
+    for w, hash in weights:
+        item, count = format_item(counts, w, hash)
+        if printing and item:
+            try:
                 print item
-            total_count += count
-    except IOError:
-        # likely because we're being piped into head or tail
-        pass
+            except IOError:
+                # likely because we're being piped into head or tail
+                printing = False
+        total_count += count
 
     log("Unique%s features: %s", '' if includezeros else ' non-zero', total_count, importance=1)
 

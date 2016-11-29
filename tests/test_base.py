@@ -26,7 +26,7 @@ $ vwoptimize.py -d small_ag_news.csv --oaa 4 -b 20 --writeconfig tmp_config -f t
 
 [parseaudit1]
 $ vwoptimize.py --quiet -i tmp_model -t -a -d small_ag_news.csv | vwoptimize.py --parseaudit | head -n 2
-(0)Unique non-zero features: 1660
+(0)Unique non-zero features: 4532
 0.0901711 his 5
 0.0761782 agreed 2
 
