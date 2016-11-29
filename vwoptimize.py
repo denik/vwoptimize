@@ -2824,7 +2824,6 @@ def main(to_cleanup):
 
     if options.kfold and not need_tuning:
         # QQQ --initial_regressor is not passed there
-        # XXX we could skip --cv here if we make main_tune() keep final predictions and raw_predictions for us
 
         assert vw_filename
 
@@ -2865,7 +2864,7 @@ def main(to_cleanup):
         if options.toperrors:
             print_toperrors(options.toperrors, y_true, cv_pred, cv_pred_text, filename=filename, format=format, ignoreheader=options.ignoreheader)
 
-        # all of these are related to CV if --cv is enabled
+        # all of these are related to --kfold if --kfold is enabled
         options.predictions = None
         options.raw_predictions = None
         options.toperror = None
