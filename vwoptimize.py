@@ -133,7 +133,10 @@ def log(s, *params, **kwargs):
     importance = kwargs.pop('importance', None) or 0
     assert not kwargs, kwargs
     if importance >= MINIMUM_LOG_IMPORTANCE:
-        sys.stdout.flush()
+        try:
+            sys.stdout.flush()
+        except IOError:
+            pass
         try:
             s = s % params
         except Exception:
