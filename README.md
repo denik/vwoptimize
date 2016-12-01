@@ -1,6 +1,6 @@
 # vwoptimize
 
-Wrapper for Vowpal Wabbit that adds hyper-parameter tuning, more performance metrics, rudimentary text preprocessing, reading from csv/tsv, feature extraction and k-fold cross-validation.
+Wrapper for Vowpal Wabbit that adds hyper-parameter tuning, more performance metrics, text preprocessing, reading from csv/tsv, feature extraction and k-fold cross-validation.
 
 In order to search for the best parameters, append question mark after a parameter you would like to tune.
 
