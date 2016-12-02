@@ -2454,6 +2454,28 @@ def log_report(prefix, metrics, breakdown_re, breakdown_top, breakdown_min, y_tr
         log_report_one(prefix + 'breakdown rest ', calculated_metrics, y_true, y_pred, config, classification_report, mask=mask)
 
 
+def json_load_byteified(f):
+    return _byteify(json.load(f, object_hook=_byteify))
+
+
+def _byteify(data, ignore_dicts=False):
+    # from http://stackoverflow.com/a/33571117
+    if isinstance(data, unicode):
+        return data.encode('utf-8')
+
+    if isinstance(data, list):
+        return [_byteify(item, ignore_dicts=True) for item in data]
+
+    if isinstance(data, dict) and not ignore_dicts:
+        return {
+            _byteify(key, ignore_dicts=True):
+            _byteify(value, ignore_dicts=True)
+            for key, value in data.iteritems()
+        }
+
+    return data
+
+
 def main(to_cleanup):
     if '--parseaudit' in sys.argv:
         parser = optparse.OptionParser()
@@ -2582,7 +2604,7 @@ def main(to_cleanup):
     config = {}
 
     if options.readconfig:
-        config = json.load(open(options.readconfig))
+        config = json_load_byteified(open(options.readconfig))
         log('vwoptimize config = %s', options.readconfig, importance=1)
 
         if 'regressor' in config and options.initial_regressor is None:
