@@ -1848,6 +1848,8 @@ metrics_param = {
     'f1_score': 'y_pred',
     'confusion_matrix': 'y_pred',
     'matthews_corrcoef': 'y_pred',
+    'recall_at_precision': 'y_score',
+    'count_pos': 'y_pred',
 }
 
 
@@ -1916,6 +1918,22 @@ def extract_score(metric, outputs):
     return values
 
 
+def recall_at_precision(*args, **kwargs):
+    from sklearn.metrics import precision_recall_curve
+    metric_param = kwargs.pop('metric_param')
+    required_precision = _parse_number_or_fraction(metric_param)
+    precision, recall, thresholds = precision_recall_curve(*args, **kwargs)
+
+    for pr, r in izip(precision, recall):
+        if pr >= required_precision:
+            return r
+
+
+def count_pos(y_true, y_pred, sample_weight=None):
+    assert sample_weight is None
+    return sum(y_true)
+
+
 def calculate_score(metric, y_true, y_pred, config):
     if metric == 'count':
         return len(y_pred)
@@ -1928,13 +1946,18 @@ def calculate_score(metric, y_true, y_pred, config):
 
     extra_args = {}
 
+    if '=' in metric:
+        assert metric.count('=') == 1, metric
+        metric, metric_param = metric.split('=')
+        extra_args['metric_param'] = metric_param
+
     if metric.endswith('_w'):
         extra_args['sample_weight'] = sample_weight
         metric = metric[:-2]
 
     fullname = metrics_shortcuts.get(metric, metric)
 
-    if 'precision' in fullname or 'recall' in fullname or 'f1' in fullname:
+    if fullname in ('precision_score', 'recall_score', 'f1_score'):
         extra_args['average'] = 'binary'
 
     import sklearn.metrics
