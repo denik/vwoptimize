@@ -2388,6 +2388,43 @@ def print_toperrors(toperrors, y_true, y_pred, y_pred_text, filename, format, ig
         output.writerow(row)
 
 
+def print_top_differences(topdiff, y_true, y_pred, y_pred_text, y_pred2, y_pred_text2, filename, format, ignoreheader):
+    assert y_true is not None
+    assert y_pred is not None
+    assert y_pred2 is not None
+    assert filename is not None
+    assert len(y_true) == len(y_pred), (len(y_true), len(y_pred))
+    assert len(y_true) == len(y_pred2), (len(y_true), len(y_pred2))
+
+    differences = []
+
+    for yp, yp_text, yp2, yp_text2, yt, example in zip(y_pred, y_pred_text, y_pred2, y_pred_text2, y_true, open_anything(filename, format, ignoreheader=ignoreheader)):
+        diff = abs(yp - yp2)
+        # XXX for multiclass, fetch raw scores
+        if yp2 * yp > 0:
+            continue
+        differences.append((diff, yp2 * yp < 0, hash(repr(example)), yp_text.strip(), yp_text2.strip(), example))
+
+    differences.sort(reverse=True)
+
+    if '.' in topdiff:
+        min_diff = float(topdiff)
+        differences = [x for x in differences if x[0] >= min_diff]
+    else:
+        count = int(topdiff)
+        differences = differences[:count]
+
+    output = csv.writer(sys.stdout)
+
+    for _diff, _diffsign, _hash, yp_text, yp_text2, example in differences:
+        row = [yp_text, yp_text2]
+        if isinstance(example, list):
+            row.extend(example)
+        else:
+            row.append(str(example).strip())
+        output.writerow(row)
+
+
 def cleanup_vw_train_options(vw_args):
     vw_args = vw_args.split()
     remove_option(vw_args, '--quiet', 0)
@@ -2578,7 +2615,7 @@ def main(to_cleanup):
 
     # vowpal wabbit arguments (those that we care about. everything else is passed through)
     parser.add_option('-r', '--raw_predictions')
-    parser.add_option('-p', '--predictions')
+    parser.add_option('-p', '--predictions', action='append', default=[])
     parser.add_option('-f', '--final_regressor')
     parser.add_option('--readable_model')
     parser.add_option('-i', '--initial_regressor')
@@ -2608,6 +2645,7 @@ def main(to_cleanup):
     # using as perf
     parser.add_option('--report', action='store_true')
     parser.add_option('--toperrors')
+    parser.add_option('--topdiffs')
     parser.add_option('--threshold', type=float)
     parser.add_option('--classification_report', action='store_true')
     parser.add_option('--breakdown')
@@ -2789,7 +2827,7 @@ def main(to_cleanup):
     vw_metrics = [x for x in options.metric if x.startswith('vw')]
 
     y_true = None
-    need_y_true_and_y_pred = calculated_metrics or options.toperrors or options.classification_report
+    need_y_true_and_y_pred = calculated_metrics or options.toperrors or options.classification_report or options.topdiffs
 
     if need_y_true_and_y_pred or options.kfold or need_tuning or options.feature_mask_retrain is not None:
         # cannot work with stdin, write it to a temp file
@@ -2829,34 +2867,58 @@ def main(to_cleanup):
             config.setdefault('max_label', max_label)
             config.setdefault('threshold', (min_label + max_label) / 2.0)
 
+    assert isinstance(options.predictions, list)
+
     if options.report:
         # XXX major source of confusion when report is done on multiclass, since it tries to calculate threshold for it rather than
         # treating it as multiclass. Perhaps refuse to calculate threshold if min_value/max_value is not 0/1 or -1/1 or if there more than 2 classes
-        if options.predictions in STDIN_NAMES:
-            if used_stdin:
-                sys.exit('Can only use stdin in one argument')
-            predictions = sys.stdin
-        elif options.predictions:
-            predictions = options.predictions
-        else:
+        if not options.predictions:
             sys.exit('Must provide -p')
 
-        assert y_true is not None
-        y_pred, y_pred_text = _load_predictions(predictions, len(y_true), with_text=True, named_labels=config.get('named_labels'))
+        list_y_pred = []
 
-        log_report(prefix='',
-                   # vw_* metrics not supported here, but pass them anyway to let the caller now
-                   metrics=options.metric,
-                   breakdown_re=options.breakdown,
-                   breakdown_top=options.breakdown_top,
-                   breakdown_min=options.breakdown_min,
-                   y_true=y_true,
-                   y_pred=y_pred,
-                   y_pred_text=y_pred_text,
-                   config=config,
-                   classification_report=options.classification_report)
+        for pred in options.predictions:
+            if pred in STDIN_NAMES:
+                if used_stdin:
+                    sys.exit('Can only use stdin in one argument')
+                predictions = sys.stdin
+                used_stdin = True
+            else:
+                predictions = pred
+
+            assert y_true is not None
+            y_pred, y_pred_text = _load_predictions(predictions, len(y_true), with_text=True, named_labels=config.get('named_labels'))
+            list_y_pred.append((y_pred, y_pred_text))
+
+            log_report(prefix='',
+                       # vw_* metrics not supported here, but pass them anyway to let the caller now
+                       metrics=options.metric,
+                       breakdown_re=options.breakdown,
+                       breakdown_top=options.breakdown_top,
+                       breakdown_min=options.breakdown_min,
+                       y_true=y_true,
+                       y_pred=y_pred,
+                       y_pred_text=y_pred_text,
+                       config=config,
+                       classification_report=options.classification_report)
+
+            if options.toperrors:
+                print_toperrors(options.toperrors, y_true, y_pred, y_pred_text, filename=filename, format=format, ignoreheader=options.ignoreheader)
+
+        if options.topdiffs:
+            if len(list_y_pred) <= 1:
+                sys.exit('Must have two predictions files specified to compare (pass -p filename1 -p filename2)')
+            y_pred, y_pred_text = list_y_pred[0]
+            y_pred2, y_pred_text2 = list_y_pred[1]
+            print_top_differences(options.topdiffs, y_true, y_pred, y_pred_text, y_pred2, y_pred_text2, filename, format, ignoreheader=options.ignoreheader)
 
         sys.exit(0)
+
+    else:
+        if options.predictions:
+            options.predictions = options.predictions[0]
+        else:
+            options.predictions = None
 
     index = 0
     while index < len(args):
