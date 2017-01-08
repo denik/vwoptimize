@@ -48,6 +48,14 @@ $ echo '|hello:25 world AA |t a b c,hey' | vwoptimize.py --columnspec vw_a,vw_a 
 $ echo '|hello:25 world AA |t a b c,hey' | vwoptimize.py --columnspec vw,vw --tovw /dev/stdout --lowercase --quiet
 |hello:25 world AA |t a b c | hey
 
+[remap_label_vw]
+$ echo '2 | hello' | vwoptimize.py --remap_label 2:-1 --tovw /dev/stdout
+-1 | hello
+
+[remap_label_csv]
+$ echo '2,hello' | vwoptimize.py --remap_label 2:-1 --tovw /dev/stdout --format csv
+-1 | hello
+
 [preprocessor_vw]
 $ echo '|Hello:25\\n' | vwoptimize.py --tovw /dev/stdout --lowercase --quiet
 |hello:25

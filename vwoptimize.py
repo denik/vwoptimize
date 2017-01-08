@@ -1529,7 +1529,7 @@ class Preprocessor(object):
         return [self.process_row(row) for row in rows]
 
 
-def read_y_true(filename, format, columnspec, ignoreheader, named_labels):
+def read_y_true(filename, format, columnspec, ignoreheader, named_labels, remap_label):
     log('Reading labels from %s', filename or 'stdin')
     if format == 'vw':
         return _load_predictions(filename, named_labels=named_labels)
@@ -1542,6 +1542,8 @@ def read_y_true(filename, format, columnspec, ignoreheader, named_labels):
 
     for row in rows_source:
         label = row[label_index]
+        if remap_label is not None:
+            label = remap_label.get(label, label)
         if named_labels is None:
             label = float(label)
         elif label not in named_labels:
@@ -1578,21 +1580,20 @@ def proper_label(s):
     return s
 
 
-def parse_weight(config, named_labels=None):
-    """
-    >>> parse_weight('A:B:2', ['A:B', 'another_label'])
-    {'A:B': '2'}
+class ParseError(ValueError):
+    pass
 
-    >>> parse_weight('A:B:2')
-    Traceback (most recent call last):
-     ...
-    SystemExit: Weight must be specified as CLASS(float):WEIGHT, 'A:B' not recognized
+
+def parse_mapping(config):
+    """
+    >>> parse_mapping('1:-1,2:1')
+    {'1': '-1', '2': '1'}
+
+    >>> parse_mapping('1:-1,2:1'.split(','))
+    {'1': '-1', '2': '1'}
     """
     if not config:
         return None
-
-    if named_labels is not None and not isinstance(named_labels, list):
-        raise TypeError('must be list, not %r' % type(named_labels))
 
     config = _make_proper_list(config)
 
@@ -1603,9 +1604,41 @@ def parse_weight(config, named_labels=None):
 
     for item in config:
         if ':' not in item:
-            sys.exit('Weight must be specified as CLASS:WEIGHT, cannot parse %r' % item)
-        label, weight = item.rsplit(':', 1)
+            raise ParseError(item)
+        key, value = item.rsplit(':', 1)
 
+        if key in result:
+            log_always('Label %r specified more than once', key)
+
+        result[key] = value
+
+    return result
+
+
+def parse_weight(config, named_labels=None):
+    """
+    >>> parse_weight('A:B:2', ['A:B', 'another_label'])
+    {'A:B': '2'}
+
+    >>> parse_weight('A:B:2')
+    Traceback (most recent call last):
+     ...
+    SystemExit: Weight must be specified as CLASS(float):WEIGHT, 'A:B' not recognized
+    """
+    if named_labels is not None and not isinstance(named_labels, list):
+        raise TypeError('must be list, not %r' % type(named_labels))
+
+    try:
+        config = parse_mapping(config)
+    except ParseError, item:
+        sys.exit('Weight must be specified as CLASS:WEIGHT, cannot parse %s' % item)
+
+    if not config:
+        return config
+
+    result = {}
+
+    for label, weight in config.items():
         if named_labels is None:
             try:
                 float(label)
@@ -1623,8 +1656,6 @@ def parse_weight(config, named_labels=None):
         if weight is None or weight < 0:
             sys.exit('Weight must be specified as CLASS:WEIGHT(float), %r is not recognized' % (item, ))
 
-        if label in result:
-            sys.exit('Label %r specified more than once' % label)
         result[label] = weight
 
     return result
@@ -1658,17 +1689,24 @@ def process_text(preprocessor, text):
     return text
 
 
-def convert_row_to_vw(row, columnspec, preprocessor, weights, named_labels):
+def convert_row_to_vw(row, columnspec, preprocessor, weights, named_labels, remap_label):
     if isinstance(row, basestring):
         if not row.strip():
             return row
         assert '|' in row, row
         assert columnspec is None
-        if preprocessor is None and not weights:
+        if preprocessor is None and not weights and not remap_label:
             return row
         label, rest = row.split('|', 1)
+
         if preprocessor is not None:
             rest = preprocessor.process_text(rest)
+
+        if remap_label is not None:
+            new_label = remap_label.get(label.strip())
+            if new_label is not None:
+                label = new_label + ' '
+
         if weights:
             # XXX ignores existing weight
             label_items = label.split(' ', 1)
@@ -1733,6 +1771,9 @@ def convert_row_to_vw(row, columnspec, preprocessor, weights, named_labels):
     if named_labels is not None and y not in named_labels:
         sys.exit('Label not recognized: %r' % (row, ))
 
+    if remap_label is not None:
+        y = remap_label.get(y, y)
+
     if weights is not None:
         weight = weights.get(y, '1')
         if weight == '1':
@@ -1746,7 +1787,7 @@ def convert_row_to_vw(row, columnspec, preprocessor, weights, named_labels):
     return text
 
 
-def _convert_any_to_vw(source, format, output, weights, preprocessor, columnspec, named_labels, ignoreheader):
+def _convert_any_to_vw(source, format, output, weights, preprocessor, columnspec, named_labels, remap_label, ignoreheader):
     if named_labels is not None:
         assert not isinstance(named_labels, basestring)
         named_labels = set(named_labels)
@@ -1755,13 +1796,13 @@ def _convert_any_to_vw(source, format, output, weights, preprocessor, columnspec
     output = open(output, 'wb')
 
     for row in rows_source:
-        vw_line = convert_row_to_vw(row, columnspec, preprocessor=preprocessor, weights=weights, named_labels=named_labels)
+        vw_line = convert_row_to_vw(row, columnspec, preprocessor=preprocessor, weights=weights, named_labels=named_labels, remap_label=remap_label)
         output.write(vw_line)
 
     flush_and_close(output)
 
 
-def convert_any_to_vw(source, format, output_filename, columnspec, named_labels, weights, preprocessor, ignoreheader, workers):
+def convert_any_to_vw(source, format, output_filename, columnspec, named_labels, remap_label, weights, preprocessor, ignoreheader, workers):
     preprocessor = preprocessor or ''
 
     assert isinstance(preprocessor, basestring), preprocessor
@@ -1787,6 +1828,9 @@ def convert_any_to_vw(source, format, output_filename, columnspec, named_labels,
 
         if named_labels:
             common_cmd += ['--named_labels', ','.join(named_labels)]
+
+        if remap_label:
+            common_cmd += ['--remap_label', ','.join('%s:%s' % item for item in remap_label.items())]
 
         if weights:
             weights = ['%s:%s' % (x, weights[x]) for x in weights if weights[x] != 1]
@@ -2116,6 +2160,7 @@ def main_tune(metric, config, filename, format, y_true, args, preprocessor_base,
                     output_filename=vw_filename,
                     columnspec=config.get('columnspec'),
                     named_labels=config.get('named_labels'),
+                    remap_label=config.get('remap_label'),
                     weights=weight_train,
                     preprocessor=preprocessor_opts,
                     ignoreheader=ignoreheader,
@@ -2540,6 +2585,8 @@ def main(to_cleanup):
     parser.add_option('-d', '--data')
     parser.add_option('-a', '--audit', action='store_true')
     parser.add_option('--named_labels')
+
+    parser.add_option('--remap_label', action='append')
     parser.add_option('--named_labels_file')
 
     parser.add_option('--readconfig')
@@ -2668,6 +2715,9 @@ def main(to_cleanup):
     if weight_metric:
         config['weight_metric'] = weight_metric
 
+    if options.remap_label:
+        config['remap_label'] = parse_mapping(options.remap_label)
+
     preprocessor_from_options = Preprocessor.from_options(options.__dict__)
 
     if preprocessor_from_options:
@@ -2713,6 +2763,7 @@ def main(to_cleanup):
             preprocessor,
             config.get('columnspec'),
             config.get('named_labels'),
+            config.get('remap_label'),
             ignoreheader=options.ignoreheader)
         sys.exit(0)
 
@@ -2758,6 +2809,7 @@ def main(to_cleanup):
             preprocessor=config.get('preprocessor'),
             columnspec=config.get('columnspec'),
             named_labels=config.get('named_labels'),
+            remap_label=config.get('remap_label'),
             weights=config.get('weight_train'),
             ignoreheader=options.ignoreheader,
             workers=options.workers)
@@ -2767,7 +2819,7 @@ def main(to_cleanup):
 
     if need_y_true_and_y_pred:
         assert filename is not None
-        y_true = read_y_true(filename, format, config.get('columnspec'), options.ignoreheader, config.get('named_labels'))
+        y_true = read_y_true(filename, format, config.get('columnspec'), options.ignoreheader, config.get('named_labels'), config.get('remap_label'))
         if not len(y_true):
             sys.exit('%s is empty' % filename)
         if not config.get('named_labels') and not is_multiclass:
@@ -2861,6 +2913,7 @@ def main(to_cleanup):
                 preprocessor=config.get('preprocessor'),
                 columnspec=config.get('columnspec'),
                 named_labels=config.get('named_labels'),
+                remap_label=config.get('remap_label'),
                 weights=weight_train,
                 ignoreheader=options.ignoreheader,
                 workers=options.workers)
@@ -2988,7 +3041,8 @@ def main(to_cleanup):
                         columnspec=config.get('columnspec'),
                         preprocessor=preprocessor,
                         weights=weight_train,
-                        named_labels=config.get('named_labels'))
+                        named_labels=config.get('named_labels'),
+                        remap_label=config.get('remap_label'))
                     popen.stdin.write(line)
                     # subprocess.Popen is unbuffered by default
                 popen.stdin.close()
