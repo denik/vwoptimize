@@ -2709,7 +2709,9 @@ def main(to_cleanup):
     if options.feature_mask_retrain_args:
         options.feature_mask_retrain = options.feature_mask_retrain_args
 
-    config = {}
+    config = {
+        'orig_commang': ' '.join(sys.argv)
+    }
 
     if options.readconfig:
         config = json_load_byteified(open(options.readconfig))
