@@ -1075,7 +1075,7 @@ def get_tuning_config(config):
     return type(**params)
 
 
-def vw_optimize_over_cv(vw_filename, y_true, kfold, args, metric, config,
+def vw_optimize_over_cv(vw_filename, y_true, kfold, args, metric, config, sample_weight,
                         workers=None, other_metrics=[],
                         feature_mask_retrain=False, show_num_features=False):
     # we only depend on scipy if parameter tuning is enabled
@@ -1148,7 +1148,7 @@ def vw_optimize_over_cv(vw_filename, y_true, kfold, args, metric, config,
 
             y_pred = _load_predictions(y_pred_text, size=len(y_true), named_labels=config.get('named_labels'))
 
-        result = calculate_or_extract_score(metric, y_true, y_pred, config, outputs)
+        result = calculate_or_extract_score(metric, y_true, y_pred, config, outputs, sample_weight)
 
         if isinstance(result, basestring):
             sys.exit('Cannot calculate %r: %s' % (metric, result))
@@ -1172,7 +1172,7 @@ def vw_optimize_over_cv(vw_filename, y_true, kfold, args, metric, config,
             best_result[0] = result
             best_result[1] = args
 
-        other_scores = [(m, _frmt_score_short(calculate_or_extract_score(m, y_true, y_pred, config, outputs))) for m in other_metrics]
+        other_scores = [(m, _frmt_score_short(calculate_or_extract_score(m, y_true, y_pred, config, outputs, sample_weight))) for m in other_metrics]
         other_results = ' '.join(['%s=%s' % x for x in other_scores])
 
         if num_features:
@@ -1532,13 +1532,24 @@ class Preprocessor(object):
 def read_y_true(filename, format, columnspec, ignoreheader, named_labels, remap_label):
     log('Reading labels from %s', filename or 'stdin')
     if format == 'vw':
-        return _load_predictions(filename, named_labels=named_labels)
+        # XXX weights are thrown away
+        return _load_predictions(filename, named_labels=named_labels), None
 
     rows_source = open_anything(filename, format, ignoreheader=ignoreheader)
 
     label_index = columnspec.index('y')
 
+    weight_index = None
+    try:
+        weight_index = columnspec.index('weight_metric')
+    except ValueError:
+        try:
+            weight_index = columnspec.index('weight')
+        except ValueError:
+            pass
+
     y_true = []
+    weights = []
 
     for row in rows_source:
         label = row[label_index]
@@ -1550,9 +1561,15 @@ def read_y_true(filename, format, columnspec, ignoreheader, named_labels, remap_
             sys.exit('Unexpected label in %s: %r (allowed: %s)' % (filename, label, named_labels))
         y_true.append(label)
 
-    y_true = np.array(y_true)
+        if weight_index is not None:
+            w = float(row[weight_index].strip() or '1')
+            weights.append(w)
 
-    return y_true
+    y_true = np.array(y_true)
+    if weights:
+        weights = np.array(weights)
+
+    return y_true, (weights if weight_index is not None else None)
 
 
 def _make_proper_list(s, type=None):
@@ -1734,6 +1751,8 @@ def convert_row_to_vw(row, columnspec, preprocessor, weights, named_labels, rema
     x = []
     info = []
     last_namespace = None
+    example_weight = None
+    example_weight1 = None
 
     for item, spec in zip(row, columnspec):
         if spec == 'y':
@@ -1760,8 +1779,16 @@ def convert_row_to_vw(row, columnspec, preprocessor, weights, named_labels, rema
             info.append(item)
         elif spec == 'drop' or not spec:
             continue
+        elif spec == 'weight':
+            example_weight = item
+        elif spec == 'weight_train':
+            example_weight1 = item
+        elif spec == 'weight_metric':
+            pass  # used by read_y_true
         else:
             sys.exit('Spec item %r not understood' % spec)
+
+    example_weight = example_weight1 or example_weight
 
     if info:
         info = " '%s" % ';'.join(info) + ' '
@@ -1774,14 +1801,19 @@ def convert_row_to_vw(row, columnspec, preprocessor, weights, named_labels, rema
     if remap_label is not None:
         y = remap_label.get(y, y)
 
-    if weights is not None:
-        weight = weights.get(y, '1')
-        if weight == '1':
-            weight = ''
-        else:
-            weight = ' ' + str(weight)
+    class_weight = weights.get(y) if weights is not None else None
+
+    if example_weight is not None and class_weight is not None:
+        weight = float(example_weight) * float(class_weight)
+    elif example_weight is None:
+        weight = class_weight
     else:
+        weight = example_weight
+
+    if weight is None:
         weight = ''
+    else:
+        weight = ' ' + str(weight).strip()
 
     text = y + weight + info + ' ' + ' '.join(x) + '\n'
     return text
@@ -1910,11 +1942,11 @@ def is_loss(metric_name):
         return True
 
 
-def calculate_or_extract_score(metric, y_true, y_pred, config, outputs):
+def calculate_or_extract_score(metric, y_true, y_pred, config, outputs, sample_weight):
     try:
         if metric.startswith('vw'):
             return extract_score(metric, outputs)
-        return calculate_score(metric, y_true, y_pred, config)
+        return calculate_score(metric, y_true, y_pred, config, sample_weight)
     except Exception, ex:
         if MINIMUM_LOG_IMPORTANCE <= 0:
             traceback.print_exc()
@@ -1978,11 +2010,17 @@ def count_pos(y_true, y_pred, sample_weight=None):
     return sum(y_true)
 
 
-def calculate_score(metric, y_true, y_pred, config):
+def calculate_score(metric, y_true, y_pred, config, sample_weight, logged_thresholds=set([0, 0.5])):
     if metric == 'count':
         return len(y_pred)
 
-    sample_weight = get_sample_weight(y_true, config.get('weight_metric'))
+    sample_weight_from_class_config = get_sample_weight(y_true, config.get('weight_metric'))
+    if sample_weight is None:
+        sample_weight = sample_weight_from_class_config
+    else:
+        assert len(sample_weight) == len(y_true), 'sample_weight len=%s y_true len=%s' % (len(sample_weight), len(y_true))
+        if sample_weight_from_class_config is not None:
+            sample_weight = np.multiply(sample_weight, sample_weight_from_class_config)
 
     threshold = config.get('threshold')
     min_label = config.get('min_label')
@@ -2030,6 +2068,9 @@ def calculate_score(metric, y_true, y_pred, config):
         return func(y_true, y_pred, **extra_args)
     elif metric_type == 'y_pred':
         if threshold is not None:
+            if threshold not in logged_thresholds:
+                log('threshold = %.3f', threshold, importance=1)
+                logged_thresholds.add(threshold)
             y_true = y_true > threshold
             y_pred = y_pred > threshold
         return func(y_true, y_pred, **extra_args)
@@ -2112,7 +2153,7 @@ def classification_report(y_true, y_pred, labels=None, sample_weight=None, digit
     return results
 
 
-def main_tune(metric, config, filename, format, y_true, args, preprocessor_base, kfold, ignoreheader, workers, feature_mask_retrain, show_num_features):
+def main_tune(metric, config, filename, format, y_true, sample_weight, args, preprocessor_base, kfold, ignoreheader, workers, feature_mask_retrain, show_num_features):
     if preprocessor_base is None:
         preprocessor_base = []
     else:
@@ -2175,6 +2216,7 @@ def main_tune(metric, config, filename, format, y_true, args, preprocessor_base,
                 vw_args,
                 optimization_metric,
                 config,
+                sample_weight=sample_weight,
                 workers=workers,
                 other_metrics=other_metrics,
                 feature_mask_retrain=feature_mask_retrain,
@@ -2453,7 +2495,7 @@ def get_breakdown_group(breakdown_re, item):
         return group
 
 
-def log_report_one(prefix, metrics, y_true, y_pred, config, classification_report, outputs=None, mask=None):
+def log_report_one(prefix, metrics, y_true, y_pred, sample_weight, config, classification_report, outputs=None, mask=None):
 
     if mask is not None:
         y_true = np.ma.MaskedArray(y_true, mask=mask).compressed()
@@ -2461,7 +2503,7 @@ def log_report_one(prefix, metrics, y_true, y_pred, config, classification_repor
         assert y_true.shape == y_pred.shape, (y_true.shape, y_pred.shape)
 
     for metric in metrics:
-        log_always('%s%s = %s', prefix, metric, _frmt_score(calculate_or_extract_score(metric, y_true, y_pred, config, outputs=outputs)))
+        log_always('%s%s = %s', prefix, metric, _frmt_score(calculate_or_extract_score(metric, y_true, y_pred, config, outputs=outputs, sample_weight=sample_weight)))
 
     if classification_report:
         assert y_true is not None
@@ -2486,8 +2528,8 @@ def parse_number_or_fraction(x, total=None):
     return x
 
 
-def log_report(prefix, metrics, breakdown_re, breakdown_top, breakdown_min, y_true, y_pred, y_pred_text, config, classification_report, outputs=None):
-    log_report_one(prefix, metrics, y_true, y_pred, config, classification_report, outputs=outputs)
+def log_report(prefix, metrics, breakdown_re, breakdown_top, breakdown_min, y_true, y_pred, y_pred_text, sample_weight, config, classification_report, outputs=None):
+    log_report_one(prefix, metrics, y_true, y_pred, sample_weight, config, classification_report, outputs=outputs)
 
     if breakdown_top and not breakdown_re:
         breakdown_re = re.compile('.+')
@@ -2552,11 +2594,11 @@ def log_report(prefix, metrics, breakdown_re, breakdown_top, breakdown_min, y_tr
     for group in groups:
         group_index = indices.get(group, rest_index)
         mask = breakdown_mask != group_index
-        log_report_one(prefix + 'breakdown ' + (max_length % group) + ' ', calculated_metrics, y_true, y_pred, config, classification_report, mask=mask)
+        log_report_one(prefix + 'breakdown ' + (max_length % group) + ' ', calculated_metrics, y_true, y_pred, sample_weight, config, classification_report, mask=mask)
 
     if print_rest:
         mask = breakdown_mask != rest_index
-        log_report_one(prefix + 'breakdown rest ', calculated_metrics, y_true, y_pred, config, classification_report, mask=mask)
+        log_report_one(prefix + 'breakdown rest ', calculated_metrics, y_true, y_pred, sample_weight, config, classification_report, mask=mask)
 
 
 def json_load_byteified(f):
@@ -2829,6 +2871,7 @@ def main(to_cleanup):
     vw_metrics = [x for x in options.metric if x.startswith('vw')]
 
     y_true = None
+    sample_weight = None
     need_y_true_and_y_pred = calculated_metrics or options.toperrors or options.classification_report or options.topdiffs
 
     if need_y_true_and_y_pred or options.kfold or need_tuning or options.feature_mask_retrain is not None:
@@ -2859,7 +2902,7 @@ def main(to_cleanup):
 
     if need_y_true_and_y_pred:
         assert filename is not None
-        y_true = read_y_true(filename, format, config.get('columnspec'), options.ignoreheader, config.get('named_labels'), config.get('remap_label'))
+        y_true, sample_weight = read_y_true(filename, format, config.get('columnspec'), options.ignoreheader, config.get('named_labels'), config.get('remap_label'))
         if not len(y_true):
             sys.exit('%s is empty' % filename)
         if not config.get('named_labels') and not is_multiclass:
@@ -2901,6 +2944,7 @@ def main(to_cleanup):
                        y_true=y_true,
                        y_pred=y_pred,
                        y_pred_text=y_pred_text,
+                       sample_weight=sample_weight,
                        config=config,
                        classification_report=options.classification_report)
 
@@ -2941,6 +2985,7 @@ def main(to_cleanup):
             filename=filename,
             format=format,
             y_true=y_true,
+            sample_weight=sample_weight,
             args=args,
             preprocessor_base=preprocessor,
             kfold=options.kfold,
@@ -3010,6 +3055,7 @@ def main(to_cleanup):
                    y_true=y_true,
                    y_pred=cv_pred,
                    y_pred_text=cv_pred_text,
+                   sample_weight=sample_weight,
                    config=config,
                    classification_report=options.classification_report,
                    outputs=outputs)
@@ -3138,6 +3184,7 @@ def main(to_cleanup):
                    y_true=y_true,
                    y_pred=y_pred,
                    y_pred_text=y_pred_text,
+                   sample_weight=sample_weight,
                    config=config,
                    classification_report=options.classification_report)
 
