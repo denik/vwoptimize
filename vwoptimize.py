@@ -2909,7 +2909,7 @@ def main(to_cleanup):
 
     assert isinstance(options.predictions, list)
 
-    if options.report:
+    if options.report or options.topdiffs:
         # XXX major source of confusion when report is done on multiclass, since it tries to calculate threshold for it rather than
         # treating it as multiclass. Perhaps refuse to calculate threshold if min_value/max_value is not 0/1 or -1/1 or if there more than 2 classes
         if not options.predictions:
