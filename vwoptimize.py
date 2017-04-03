@@ -2286,11 +2286,6 @@ def parseaudit(source, includezeros=False):
                 continue
 
             example_features[hash] = text
-
-            if hash in weights:
-                assert weights.get(hash) == weight, (hash, text, weight, weights.get(hash))
-                continue
-
             weights[hash] = weight
 
         for hash, feature in example_features.iteritems():
