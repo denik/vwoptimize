@@ -3,7 +3,6 @@ import os
 import re
 
 filename = 'vwoptimize.py'
-__version__ = '0.4.0dev'
 version_regex = r"__version__ = '([^']+)'"
 versiondev_regex = r"(\.\d)dev(')"
 
