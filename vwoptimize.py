@@ -1901,6 +1901,7 @@ def convert_any_to_vw(source, format, output_filename, columnspec, named_labels,
 metrics_shortcuts = {
     'mse': 'mean_squared_error',
     'rmse': 'root_mean_squared_error',
+    'mae': 'mean_absolute_error',
     'auc': 'roc_auc_score',
     'brier': 'brier_score_loss',
     'acc': 'accuracy_score',
@@ -1913,6 +1914,7 @@ metrics_shortcuts = {
 
 metrics_param = {
     'mean_squared_error': 'y_score',
+    'mean_absolute_error': 'y_score',
     'root_mean_squared_error': 'y_score',
     'hinge_loss': 'y_score',
     'roc_auc_score': 'y_score',
