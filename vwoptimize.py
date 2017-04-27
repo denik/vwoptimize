@@ -226,6 +226,11 @@ class PassThroughOptionParser(optparse.OptionParser):
             except (optparse.BadOptionError, optparse.AmbiguousOptionError), e:
                 largs.append(e.opt_str)
 
+    def _match_long_opt(self, opt):
+        if opt in self._long_opt:
+            return opt
+        raise optparse.BadOptionError(opt)
+
 
 def system(cmd, importance=1):
     if isinstance(cmd, deque):
