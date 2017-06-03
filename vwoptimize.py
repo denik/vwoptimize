@@ -2049,10 +2049,10 @@ def calculate_score(metric, y_true, y_pred, config, sample_weight, logged_thresh
     if fullname in ('precision_score', 'recall_score', 'f1_score'):
         extra_args['average'] = 'binary'
 
-    import sklearn.metrics
     if fullname in globals():
         func = globals()[fullname]
     else:
+        import sklearn.metrics
         func = getattr(sklearn.metrics, fullname, None)
         if func is None:
             sys.exit('Cannot find %r in sklearn.metrics' % (fullname, ))
