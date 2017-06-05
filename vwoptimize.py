@@ -787,9 +787,9 @@ def _load_predictions(file, size=None, with_text=False, named_labels=None):
             mult = int(len(result) / size)
             if size * mult == len(result):
                 # if --passes N option was used, then the number of predictions will be N times higher
-                return np.array(result[-size:])
-
-            sys.exit('Too many items in %s: found %r, expecting multiply of %r' % (limited_repr(filename), len(result), size))
+                result = result[-size:]
+            else:
+                sys.exit('Too many items in %s: found %r, expecting multiply of %r' % (limited_repr(filename), len(result), size))
 
     if with_text:
         return np.array(result), result_text
