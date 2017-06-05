@@ -1933,6 +1933,7 @@ metrics_param = {
     'matthews_corrcoef': 'y_pred',
     'recall_at_precision': 'y_score',
     'count_pos': 'y_pred',
+    'kendall_tau': 'y_score',
 }
 
 
@@ -2015,6 +2016,12 @@ def recall_at_precision(*args, **kwargs):
 def count_pos(y_true, y_pred, sample_weight=None):
     assert sample_weight is None
     return sum(y_true)
+
+
+def kendall_tau(y_true, y_score):
+    from scipy.stats import kendalltau
+    ret_score = kendalltau(y_true, y_score)[0]
+    return ret_score if not np.isnan(ret_score) else 0.0
 
 
 def calculate_score(metric, y_true, y_pred, config, sample_weight, logged_thresholds=set([0, 0.5])):
