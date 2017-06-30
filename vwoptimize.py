@@ -1887,6 +1887,8 @@ def convert_any_to_vw(source, format, output_filename, columnspec, named_labels,
         if not success:
             sys.exit(1)
 
+        unlink(*batches)
+
         cmd = 'cat ' + ' '.join(batches_out)
         if output_filename:
             cmd += ' > %s' % output_filename
