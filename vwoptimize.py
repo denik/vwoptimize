@@ -1092,7 +1092,7 @@ def vw_optimize_over_cv(vw_filename, y_true, kfold, args, metric, config, sample
     assert isinstance(args, list), args
 
     for param in args:
-        if isinstance(param, ValuesParam):
+        if isinstance(param, (ValuesParam, BinaryParam)):
             gridsearch_params.append(param)
         elif isinstance(param, BaseParam):
             tunable_params.append(param)
