@@ -1754,16 +1754,33 @@ def convert_row_to_vw(row, columnspec, preprocessor, weights, named_labels, rema
                 label = new_label + ' '
 
         if weights:
-            # XXX ignores existing weight
-            label_items = label.split(' ', 1)
+            label_items = label.split(' ', 2)
             y = label_items[0]
 
             if named_labels is not None and y not in named_labels:
                 sys.exit('Label not recognized: %r' % (row, ))
 
-            weight = weights.get(y)
-            if weight is not None:
-                label = y + ' ' + str(weight) + ' ' + ' '.join(label_items[1:])
+            class_weight = weights.get(y, 1)
+            if class_weight is None or float(class_weight) == 1.0:
+                # don't need to update label/weight part
+                pass
+            else:
+                weight_token = label_items[1] if len(label_items) >= 2 else None
+
+                if not weight_token or not weight_token.strip() or weight_token.startswith("'") or weight_token.startswith("|"):
+                    example_weight = 1
+                    rest_label = ' '.join(label_items[1:])
+                else:
+                    example_weight = float(weight_token)
+                    rest_label = ' '.join(label_items[2:])
+
+                final_weight = example_weight * float(class_weight)
+
+                if final_weight == 1:
+                    label = y + ' ' + rest_label
+                else:
+                    label = y + ' ' + str(final_weight) + ' ' + rest_label
+
         return label + '|' + rest
 
     assert isinstance(columnspec, list), columnspec

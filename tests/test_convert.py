@@ -24,6 +24,25 @@ $ vwoptimize.py -d simple.csv --tovw /dev/stdout --weight_metric 1:0.5
 2 | Goodbye World. second class
 1 | hello first class again
 
+
+[fromvw_tovw]
+$ vwoptimize.py -d simple.vw --tovw /dev/stdout
+0 | price:.23 sqft:.25 age:.05 2006
+1 2 'second_house | price:.18 sqft:.15 age:.35 1976
+0 1 0.5 'third_house | price:.53 sqft:.32 age:.87 1924
+
+[fromvw_tovw__weight1]
+$ vwoptimize.py -d simple.vw --tovw /dev/stdout --weight 1:1.5
+0 | price:.23 sqft:.25 age:.05 2006
+1 3.0 'second_house | price:.18 sqft:.15 age:.35 1976
+0 1 0.5 'third_house | price:.53 sqft:.32 age:.87 1924
+
+[fromvw_tovw__weight2]
+$ vwoptimize.py -d simple.vw --tovw /dev/stdout --weight 1:2,0:0.1
+0 0.1 | price:.23 sqft:.25 age:.05 2006
+1 4.0 'second_house | price:.18 sqft:.15 age:.35 1976
+0 0.1 0.5 'third_house | price:.53 sqft:.32 age:.87 1924
+
 [named_labels1]
 $ vwoptimize.py -d text_labels.csv --tovw /dev/stdout --named_labels welcome,bye --weight welcome:0.5
 welcome 0.5 | Hello World!
@@ -62,7 +81,7 @@ $ echo '|Hello:25\\n' | vwoptimize.py --tovw /dev/stdout --lowercase --quiet
 
 [weight_vw]
 $ echo '1 | Hello:25\\n' | vwoptimize.py --tovw /dev/stdout --quiet --weight 1:10
-1 10 | Hello:25
+1 10.0 | Hello:25
 
 [weight_vw_run]
 $ echo '1 | Hello:25' | vwoptimize.py --weight 1:10 2>&1 | grep weighted
