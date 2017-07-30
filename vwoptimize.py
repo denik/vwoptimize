@@ -748,7 +748,7 @@ def parse_vw_output(output):
     return result
 
 
-def _load_predictions(file, size=None, with_text=False, named_labels=None):
+def _load_predictions(file, size=None, with_text=False, named_labels=None, with_weights=False):
     filename = file
     if isinstance(file, list):
         filename = file
@@ -763,13 +763,23 @@ def _load_predictions(file, size=None, with_text=False, named_labels=None):
 
     result = []
     result_text = []
+    importance_weights = [] if with_weights else None
 
     for line in file:
         try:
             text = line.strip()
             if with_text:
                 result_text.append(text)
-            label = text.split()[0]
+            items = text.split()
+            label = items[0]
+            if importance_weights is not None:
+                if len(items) >= 2:
+                    w = items[1]
+                    if w.startswith('|') or w.startswith("'"):
+                        w = 1.0
+                    else:
+                        w = float(w)
+                    importance_weights.append(w)
             if named_labels is not None:
                 if label not in named_labels:
                     sys.exit('Unexpected label %r from %r' % (label, filename))
@@ -792,10 +802,24 @@ def _load_predictions(file, size=None, with_text=False, named_labels=None):
             else:
                 sys.exit('Too many items in %s: found %r, expecting multiply of %r' % (limited_repr(filename), len(result), size))
 
+    retvalue = [np.array(result)]
+
     if with_text:
-        return np.array(result), result_text
-    else:
-        return np.array(result)
+        retvalue.append(result_text)
+
+    if with_weights:
+        if not importance_weights:
+            retvalue.append(None)
+        else:
+            if len(importance_weights) != len(result):
+                sys.exit('Could not parse importance weights')
+            importance_weights = np.array(importance_weights)
+            retvalue.append(importance_weights)
+
+    if len(retvalue) == 1:
+        return retvalue[0]
+
+    return tuple(retvalue)
 
 
 class BaseParam(object):
@@ -1538,8 +1562,7 @@ class Preprocessor(object):
 def read_y_true(filename, format, columnspec, ignoreheader, named_labels, remap_label):
     log('Reading labels from %s', filename or 'stdin')
     if format == 'vw':
-        # XXX weights are thrown away
-        return _load_predictions(filename, named_labels=named_labels), None
+        return _load_predictions(filename, named_labels=named_labels, with_weights=True)
 
     rows_source = open_anything(filename, format, ignoreheader=ignoreheader)
 
@@ -2513,6 +2536,7 @@ def log_report_one(prefix, metrics, y_true, y_pred, sample_weight, config, class
     if mask is not None:
         y_true = np.ma.MaskedArray(y_true, mask=mask).compressed()
         y_pred = np.ma.MaskedArray(y_pred, mask=mask).compressed()
+        sample_weight = np.ma.MaskedArray(sample_weight, mask=mask).compressed() if sample_weight is not None else None
         assert y_true.shape == y_pred.shape, (y_true.shape, y_pred.shape)
 
     for metric in metrics:
