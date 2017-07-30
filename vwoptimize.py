@@ -1960,6 +1960,7 @@ def calculate_or_extract_score(metric, y_true, y_pred, config, outputs, sample_w
         return calculate_score(metric, y_true, y_pred, config, sample_weight)
     except Exception, ex:
         if MINIMUM_LOG_IMPORTANCE <= 0:
+            traceback.print_stack()
             traceback.print_exc()
         return '%s: %s' % (type(ex).__name__, ex)
 
