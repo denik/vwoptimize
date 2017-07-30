@@ -227,6 +227,7 @@ class PassThroughOptionParser(optparse.OptionParser):
                 largs.append(e.opt_str)
 
     def _match_long_opt(self, opt):
+        # This disable shortcuts so that '--ignorecount' is not parsed '--ignore' which conflics with "vw --ignore"
         if opt in self._long_opt:
             return opt
         raise optparse.BadOptionError(opt)
