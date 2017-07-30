@@ -2074,9 +2074,7 @@ def calculate_score(metric, y_true, y_pred, config, sample_weight, logged_thresh
         metric, metric_param = metric.split('=')
         extra_args['metric_param'] = metric_param
 
-    if metric.endswith('_w'):
-        extra_args['sample_weight'] = sample_weight
-        metric = metric[:-2]
+    extra_args['sample_weight'] = sample_weight
 
     fullname = metrics_shortcuts.get(metric, metric)
 

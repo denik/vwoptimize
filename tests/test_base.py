@@ -147,19 +147,16 @@ $ printf '0\\n0\\n0\\n1\\n' > tmp_y_pred
 <BLANKLINE>
 
 [report1]
-$ vwoptimize.py -d tmp_y_true --format csv --report -p tmp_y_pred --metric acc,acc_w
+$ vwoptimize.py -d tmp_y_true --format csv --report -p tmp_y_pred --metric acc
 (0)acc = 0.75
-acc_w = 0.75
 
 [report2]
-$ vwoptimize.py -d tmp_y_true --format csv --report -p tmp_y_pred --metric acc_w,acc --weight 0:0
-(0)acc_w = 0.5
-acc = 0.75
+$ vwoptimize.py -d tmp_y_true --format csv --report -p tmp_y_pred --metric acc --weight 0:0
+(0)acc = 0.5
 
 [report3]
-$ vwoptimize.py -d tmp_y_true --format csv --report -p tmp_y_pred --metric acc,acc_w --weight 0:0.22
-(0)acc = 0.75
-acc_w = 0.590164
+$ vwoptimize.py -d tmp_y_true --format csv --report -p tmp_y_pred --metric acc --weight 0:0.22
+(0)acc = 0.590164
 
 [report4]
 $ cat tmp_y_true | vwoptimize.py --format csv --report -p tmp_y_pred --metric acc
