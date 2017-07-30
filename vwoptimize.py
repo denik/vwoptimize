@@ -1857,7 +1857,11 @@ def _convert_any_to_vw(source, format, output, weights, preprocessor, columnspec
     output = open(output, 'wb')
 
     for row in rows_source:
-        vw_line = convert_row_to_vw(row, columnspec, preprocessor=preprocessor, weights=weights, named_labels=named_labels, remap_label=remap_label)
+        try:
+            vw_line = convert_row_to_vw(row, columnspec, preprocessor=preprocessor, weights=weights, named_labels=named_labels, remap_label=remap_label)
+        except Exception:
+            log_always('Failed to parse: %r', row)
+            raise
         output.write(vw_line)
 
     flush_and_close(output)
