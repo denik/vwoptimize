@@ -2398,7 +2398,7 @@ def _frmt_score(x):
     if isinstance(x, float):
         if x < 0:
             x = -x
-        return '%g%s' % (x, suffix)
+        return '%f%s' % (x, suffix)
     return str(x)
 
 
