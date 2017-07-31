@@ -2084,6 +2084,11 @@ def calculate_score(metric, y_true, y_pred, config, sample_weight, logged_thresh
         if sample_weight_from_class_config is not None:
             sample_weight = np.multiply(sample_weight, sample_weight_from_class_config)
 
+    if metric == 'weight':
+        if sample_weight is not None:
+            return sum(sample_weight)
+        return len(y_pred)
+
     threshold = config.get('threshold')
     min_label = config.get('min_label')
     max_label = config.get('max_label')
