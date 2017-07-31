@@ -2403,7 +2403,12 @@ def _frmt_score(x):
     if isinstance(x, float):
         if x < 0:
             x = -x
-        return '%f%s' % (x, suffix)
+        # %g would use scientific notation for big numbers
+        # %f alone would add trailing zeros
+        x = '%f' % x
+        if '.' in x:
+            x = x.rstrip('0').rstrip('.')
+        return x + suffix
     return str(x)
 
 
