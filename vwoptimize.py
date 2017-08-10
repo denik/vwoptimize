@@ -1420,7 +1420,7 @@ class Preprocessor(object):
     'hello \xe7\xb9\x81 \xe7\xae\x80 \xe8\xbd\xac \xe6\x8d\xa2 \xe5\x99\xa8'
     """
 
-    ALL_OPTIONS = '''
+    ALL_OPTIONS_BINARY = '''
         htmlunescape
         lowercase
         strip_punct
@@ -1434,13 +1434,29 @@ class Preprocessor(object):
         chinese_simplify
         NFKC
     '''.strip().split()
+
+    ALL_OPTIONS_INT = '''
+        max_words
+        max_length
+        max_length_offset
+        max_word_size
+    '''.strip().split()
+
+    ALL_OPTIONS = ALL_OPTIONS_BINARY + ALL_OPTIONS_INT
+
     ALL_OPTIONS_DASHDASH = ['--%s' % x for x in ALL_OPTIONS]
+
+    @classmethod
+    def init_option_parser(cls, parser):
+        for opt in cls.ALL_OPTIONS_BINARY:
+            parser.add_option('--%s' % opt, action='store_true')
+        for opt in cls.ALL_OPTIONS_INT:
+            parser.add_option('--%s' % opt, type=int)
 
     @classmethod
     def parse_options(cls, string):
         parser = PassThroughOptionParser()
-        for opt in cls.ALL_OPTIONS_DASHDASH:
-            parser.add_option(opt, action='store_true')
+        cls.init_option_parser(parser)
         options, args = parser.parse_args(string.split())
         return options.__dict__
 
@@ -1464,7 +1480,9 @@ class Preprocessor(object):
         return cls(**options)
 
     def to_options(self):
-        return ['--%s' % opt for opt in self.ALL_OPTIONS if getattr(self, opt, None)]
+        result = ['--%s' % opt for opt in self.ALL_OPTIONS_BINARY if getattr(self, opt, None)]
+        result += ['--%s %s' % (opt, getattr(self, opt)) for opt in self.ALL_OPTIONS_INT if getattr(self, opt, None)]
+        return result
 
     def __init__(self, **kwargs):
         for option in self.ALL_OPTIONS:
@@ -1499,6 +1517,12 @@ class Preprocessor(object):
         try:
             text = text.decode('utf-8', errors='ignore')
 
+            if self.max_length_offset:
+                text = text[self.max_length_offset:]
+
+            if self.max_length:
+                text = text[:self.max_length]
+
             # quite costly
             # if self.normalize_space:
             #     text = u''.join(u' ' if unicodedata.category(x)[:1] in 'CZ' else x for x in text)
@@ -1519,6 +1543,12 @@ class Preprocessor(object):
                 words = re.findall(r"(?u)\b\w\w+\b", text)
             else:
                 words = text.split()
+
+            if self.max_words:
+                words = words[:self.max_words]
+
+            if self.max_word_size:
+                words = [x[:self.max_word_size] for x in words]
 
             if self.stem:
                 words = stem_words(words)
@@ -2738,8 +2768,7 @@ def main(to_cleanup):
     parser.add_option('--writeconfig')
 
     # preprocessing options:
-    for opt in Preprocessor.ALL_OPTIONS:
-        parser.add_option('--%s' % opt, action='store_true')
+    Preprocessor.init_option_parser(parser)
     parser.add_option('--columnspec')
 
     # should be 'count'
