@@ -757,7 +757,7 @@ def _load_predictions(file, size=None, with_text=False, named_labels=None, with_
     elif isinstance(file, basestring):
         if file in STDOUT_NAMES:
             sys.exit('Will not read %s' % file)
-        file = open(file)
+        file = open_regular_or_compressed(file)
     else:
         raise AssertionError(limited_repr(file))
 
