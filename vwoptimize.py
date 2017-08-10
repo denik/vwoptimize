@@ -2835,6 +2835,9 @@ def main(to_cleanup):
     if options.vw:
         globals()['VW_CMD'] = options.vw
 
+    if options.data is None and args:
+        sys.exit('Must provide -d/--data. In order to read from stdin, pass "-d -".')
+
     used_stdin = False
     if options.data is None or options.data in STDIN_NAMES:
         used_stdin = True
