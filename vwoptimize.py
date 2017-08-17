@@ -2350,12 +2350,16 @@ def format_item(counts, weight, hash):
     return '%g %s' % (weight, top_items), count
 
 
-def parseaudit(source, includezeros=False):
-    weights = {}
-    counts = {}  # hash -> text -> count
+def parseaudit(source, includezeros=False, oaa=None, top=None, bottom=None):
+    weights_per_class = {}  # class -> hash -> weight
+    counts_per_class = {}  # class -> hash -> text -> count
     line = None
+    top = top or 0
+    bottor = bottom or 0
 
     # TODO: for binary labels, count positive vs negative class
+
+    current_class = 1
 
     while True:
         line = source.readline()
@@ -2381,32 +2385,52 @@ def parseaudit(source, includezeros=False):
                 continue
 
             example_features[hash] = text
-            weights[hash] = weight
+            weights_per_class.setdefault(current_class, {})[hash] = weight
 
         for hash, feature in example_features.iteritems():
+            counts = counts_per_class.setdefault(current_class, {})
             c = counts.get(hash)
             if c is None:
                 counts[hash] = {feature: 1}
             else:
                 c[feature] = c.get(feature, 0) + 1
 
-    weights = [(w, hash) for (hash, w) in weights.iteritems()]
-    weights.sort(reverse=True)
+        if oaa is not None:
+            current_class += 1
+            if current_class > oaa:
+                current_class = 1
 
     total_count = 0
-    printing = True
+    for klass in sorted(weights_per_class.keys()):
+        if oaa is not None:
+            print "\nclass: %s" % klass
+        weights = weights_per_class[klass]
+        weights = [(w, hash) for (hash, w) in weights.iteritems()]
+        weights.sort(reverse=True)
 
-    for w, hash in weights:
-        item, count = format_item(counts, w, hash)
-        if printing and item:
-            try:
-                print item
-            except IOError:
-                # likely because we're being piped into head or tail
-                printing = False
-        total_count += count
+        printing = True
+
+        for index, (w, hash) in enumerate(weights):
+            item, count = format_item(counts_per_class[klass], w, hash)
+            total_count += 1
+
+            if top or bottom:
+                if index >= top and index < len(weights) - bottom:
+                    if index == top:
+                        print '...'
+                    continue
+
+            if printing and item:
+                try:
+                    print item
+                except IOError:
+                    # likely because we're being piped into head or tail
+                    printing = False
+                    # not aborting loop so that total_count is good
 
     log("Unique%s features: %s", '' if includezeros else ' non-zero', total_count, importance=1)
+    if oaa is not None:
+        log("Unique%s features per class: %g", '' if includezeros else ' non-zero', total_count / float(oaa), importance=1)
 
 
 def mean_h(values):
@@ -2724,10 +2748,13 @@ def main(to_cleanup):
         parser = optparse.OptionParser()
         parser.add_option('--parseaudit', action='store_true')
         parser.add_option('--includezeros', action='store_true')
+        parser.add_option('--oaa', type=int)
+        parser.add_option('--top', type=int)
+        parser.add_option('--bottom', type=int)
         options, args = parser.parse_args()
         if args:
             sys.exit('Unexpected arguments with --parseaudit: %r' % args)
-        parseaudit(sys.stdin, includezeros=options.includezeros)
+        parseaudit(sys.stdin, includezeros=options.includezeros, oaa=options.oaa, top=options.top, bottom=options.bottom)
         sys.exit(0)
 
     if '--version' in sys.argv:
