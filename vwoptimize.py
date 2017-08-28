@@ -2355,7 +2355,7 @@ def parseaudit(source, includezeros=False, oaa=None, top=None, bottom=None):
     counts_per_class = {}  # class -> hash -> text -> count
     line = None
     top = top or 0
-    bottor = bottom or 0
+    bottom = bottom or 0
 
     # TODO: for binary labels, count positive vs negative class
 
