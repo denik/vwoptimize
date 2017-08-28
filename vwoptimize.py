@@ -2011,6 +2011,11 @@ metrics_param = {
     'recall_at_precision': 'y_score',
     'count_pos': 'y_pred',
     'kendall_tau': 'y_score',
+    'count': 'y_score',
+    'tp': 'y_pred',
+    'fp': 'y_pred',
+    'tn': 'y_pred',
+    'fn': 'y_pred',
 }
 
 
@@ -2102,10 +2107,43 @@ def kendall_tau(y_true, y_score):
     return ret_score if not np.isnan(ret_score) else 0.0
 
 
-def calculate_score(metric, y_true, y_pred, config, sample_weight, logged_thresholds=set([0, 0.5])):
-    if metric == 'count':
-        return len(y_pred)
+def count(y_true, y_pred, sample_weight=None):
+    return len(y_pred)
 
+
+def tp(y_true, y_pred, sample_weight=None):
+    result = y_true == y_pred
+    result = np.multiply(result, y_true > 0)
+    if sample_weight is not None:
+        result = np.multiply(result, sample_weight)
+    return sum(result)
+
+
+def fp(y_true, y_pred, sample_weight=None):
+    result = y_true != y_pred
+    result = np.multiply(result, ~y_true)
+    if sample_weight is not None:
+        result = np.multiply(result, sample_weight)
+    return sum(result)
+
+
+def tn(y_true, y_pred, sample_weight=None):
+    result = y_true == y_pred
+    result = np.multiply(result, ~y_true)
+    if sample_weight is not None:
+        result = np.multiply(result, sample_weight)
+    return sum(result)
+
+
+def fn(y_true, y_pred, sample_weight=None):
+    result = y_true != y_pred
+    result = np.multiply(result, y_true)
+    if sample_weight is not None:
+        result = np.multiply(result, sample_weight)
+    return sum(result)
+
+
+def calculate_score(metric, y_true, y_pred, config, sample_weight, logged_thresholds=set([0, 0.5])):
     sample_weight_from_class_config = get_sample_weight(y_true, config.get('weight_metric'))
     if sample_weight is None:
         sample_weight = sample_weight_from_class_config
