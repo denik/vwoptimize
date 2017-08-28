@@ -177,22 +177,22 @@ $ vwoptimize.py -d iris.vw --metric vw_train_weighted_example_sum,vw_average_los
 2-fold vw_average_loss = 0.32
 
 [kfold_extreme]
-$ head -n 50 iris.vw | vwoptimize.py --metric vw_train_weighted_example_sum,vw_average_loss --oaa 3 --kfold 50
+$ head -n 50 iris.vw | vwoptimize.py -d - --metric vw_train_weighted_example_sum,vw_average_loss --oaa 3 --kfold 50
 (0)50-fold vw_train_weighted_example_sum = 49
 50-fold vw_average_loss = 0.24
 
 [kfold_extreme2]
-$ head -n 50 iris.vw | vwoptimize.py --metric vw_train_weighted_example_sum,vw_average_loss --oaa 3 --kfold 49
+$ head -n 50 iris.vw | vwoptimize.py -d - --metric vw_train_weighted_example_sum,vw_average_loss --oaa 3 --kfold 49
 (0)49-fold vw_train_weighted_example_sum = 48.979592
 49-fold vw_average_loss = 0.234694
 
 [kfold_too_many]
-$ head -n 50 iris.vw | vwoptimize.py --metric vw_train_weighted_example_sum,vw_average_loss --oaa 3 --kfold 51
+$ head -n 50 iris.vw | vwoptimize.py -d - --metric vw_train_weighted_example_sum,vw_average_loss --oaa 3 --kfold 51
 (0)51-fold vw_train_weighted_example_sum = 49.019608
 51-fold vw_average_loss = nan
 
 [cv_predictions_stdout]
-$ head -n 10 iris.vw | vwoptimize.py --kfold 10 --oaa 3 -p /dev/stdout
+$ head -n 10 iris.vw | vwoptimize.py -d - --kfold 10 --oaa 3 -p /dev/stdout
 (0)10-fold vw_average_loss = 0.6
 3
 1
@@ -206,7 +206,7 @@ $ head -n 10 iris.vw | vwoptimize.py --kfold 10 --oaa 3 -p /dev/stdout
 2
 
 [cv_predictions1]
-$ head -n 10 iris.vw | vwoptimize.py --kfold 10 --oaa 3 -p tmp_iris_vw_10_predictions -r tmp_iris_vw_10_raw -f tmp_model_after_cv --readable_model tmp_readable_model_after_cv --quiet
+$ head -n 10 iris.vw | vwoptimize.py -d - --kfold 10 --oaa 3 -p tmp_iris_vw_10_predictions -r tmp_iris_vw_10_raw -f tmp_model_after_cv --readable_model tmp_readable_model_after_cv --quiet
 (0)10-fold vw_average_loss = 0.6
 
 [cv_predictions2]
@@ -257,30 +257,30 @@ $ printf '1 | hello\\n-1 | world' | vw 2>&1 | grep 'average loss'
 average loss = 1.285535
 
 [progressive_validation]
-$ printf '1 | hello\\n-1 | world' | vwoptimize.py -p /dev/stdout --quiet
+$ printf '1 | hello\\n-1 | world' | vwoptimize.py -d - -p /dev/stdout --quiet
 0
 0.253423
 
 [progressive_validation_raw_mse]
-$ printf '1 | hello\\n-1 | world' | vwoptimize.py -r /dev/stdout --metric mse --quiet
+$ printf '1 | hello\\n-1 | world' | vwoptimize.py -d - -r /dev/stdout --metric mse --quiet
 (0)mse = 1.285535
 0
 0.253423
 
 [kfold2]
-$ printf '1 | hello\\n-1 | world' | vwoptimize.py --kfold 2 -p /dev/stdout
+$ printf '1 | hello\\n-1 | world' | vwoptimize.py -d - --kfold 2 -p /dev/stdout
 (0)2-fold vw_average_loss = 1.571069
 -0.253423
 0.253423
 
 [kfold2_raw]
-$ printf '1 | hello\\n-1 | world' | vwoptimize.py --kfold 2 -r /dev/stdout --metric mse
+$ printf '1 | hello\\n-1 | world' | vwoptimize.py -d - --kfold 2 -r /dev/stdout --metric mse
 (0)2-fold mse = 1.571069
 -0.253423
 0.253423
 
 [kfold3]
-$ printf '1 | hello\\n-1 | world' | vwoptimize.py --kfold 3
+$ printf '1 | hello\\n-1 | world' | vwoptimize.py -d - --kfold 3
 (0)3-fold vw_average_loss = nan
 
 [kfold2_with_holdout]
