@@ -2450,7 +2450,7 @@ def parseaudit(source, includezeros=False, oaa=None, top=None, bottom=None):
 
         for index, (w, hash) in enumerate(weights):
             item, count = format_item(counts_per_class[klass], w, hash)
-            total_count += 1
+            total_count += count
 
             if top or bottom:
                 if index >= top and index < len(weights) - bottom:
