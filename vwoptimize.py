@@ -1938,6 +1938,9 @@ def convert_any_to_vw(source, format, output_filename, columnspec, named_labels,
 
         common_cmd = [quote(sys.executable), quote(__file__), '--format', format]
 
+        if TMP_PREFIX:
+            common_cmd += ['--tmp', TMP_PREFIX]
+
         if named_labels:
             common_cmd += ['--named_labels', ','.join(named_labels)]
 
