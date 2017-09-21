@@ -48,9 +48,9 @@ header, count = re.subn(re.escape("GIT"), git_describe, header)
 write(filename, header + rest)
 os.system('diff -U 1 %s.backup %s' % (filename, filename))
 
-if 'dirty' in git_describe or 'upload' not in sys.argv:
-    system("%s setup.py sdist" % sys.executable)
-else:
-    system("%s setup.py sdist upload" % sys.executable)
-
+system("%s setup.py sdist" % sys.executable)
 system("cp %s.backup %s" % (filename, filename))
+
+print 'Now use twine to do the upload.'
+print 'twine upload dist/vwoptimize-X.X.X.tar.gz'
+print 'Check on https://pypi.org/project/vwoptimize/'
