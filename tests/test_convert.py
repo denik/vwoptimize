@@ -113,6 +113,72 @@ $ vwoptimize.py -d simple.csv --weight 2:2 -b 10/20? 2>&1 | grep weighted
 weighted example sum = 4.000000
 weighted label sum = 6.000000
 
+[max_words_0]
+$ vwoptimize.py -d simple.csv --max_words 0 --tovw_simple /dev/stdout | sed 's/ //g'
+1|
+2|
+1|
+
+[max_words_1]
+$ vwoptimize.py -d simple.csv --max_words 1 --tovw_simple /dev/stdout
+1 | Hello first
+2 | Goodbye second
+1 | hello first
+
+[max_words_2]
+$ vwoptimize.py -d simple.csv --max_words 2 --tovw_simple /dev/stdout
+1 | Hello World! first class
+2 | Goodbye World. second class
+1 | hello first class
+
+[max_words_-1]
+$ vwoptimize.py -d simple.csv --max_words -1 --tovw_simple /dev/stdout
+1 | Hello first
+2 | Goodbye second
+1 |  first class
+
+[max_words_size_4]
+$ vwoptimize.py -d simple.csv --max_word_size 4 --tovw_simple /dev/stdout
+1 | Hell Worl firs clas
+2 | Good Worl seco clas
+1 | hell firs clas agai
+
+[max_words_size_0]
+$ vwoptimize.py -d simple.csv --max_word_size 0 --tovw_simple /dev/stdout | sed 's/ //g'
+1|
+2|
+1|
+
+[max_words_size_-1]
+$ vwoptimize.py -d simple.csv --max_word_size -1 --tovw_simple /dev/stdout
+1 | Hell World firs clas
+2 | Goodby World secon clas
+1 | hell firs clas agai
+
+[max_length_5]
+$ vwoptimize.py -d simple.csv --max_length 5 --tovw_simple /dev/stdout
+1 | Hello first
+2 | Goodb secon
+1 | hello first
+
+[max_length_0]
+$ vwoptimize.py -d simple.csv --max_length 0 --tovw_simple /dev/stdout | sed 's/ //g'
+1|
+2|
+1|
+
+[max_length_-2]
+$ vwoptimize.py -d simple.csv --max_length -2 --tovw_simple /dev/stdout
+1 | Hello Worl first cla
+2 | Goodbye Worl second cla
+1 | hel first class aga
+
+[max_length_offset_3]
+$ vwoptimize.py -d simple.csv --max_length_offset 3 --tovw_simple /dev/stdout
+1 | lo World! st class
+2 | dbye World. ond class
+1 | lo st class again
+
 [cleanup]
 $ ls .vwoptimize
 <BLANKLINE>

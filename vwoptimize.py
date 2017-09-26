@@ -1472,7 +1472,7 @@ class Preprocessor(object):
             options = cls.parse_options(options)
 
         for opt in cls.ALL_OPTIONS:
-            if options[opt]:
+            if options[opt] is not None:
                 break
         else:
             return None
@@ -1485,8 +1485,14 @@ class Preprocessor(object):
         return result
 
     def __init__(self, **kwargs):
-        for option in self.ALL_OPTIONS:
+        for option in self.ALL_OPTIONS_BINARY:
             setattr(self, option, kwargs.get(option, False))
+
+        for option in self.ALL_OPTIONS_INT:
+            value = kwargs.get(option)
+            if value is not None:
+                value = int(value)
+            setattr(self, option, value)
 
         if self.stem:
             stem_words(["testing"])
@@ -1517,10 +1523,10 @@ class Preprocessor(object):
         try:
             text = text.decode('utf-8', errors='ignore')
 
-            if self.max_length_offset:
+            if self.max_length_offset is not None:
                 text = text[self.max_length_offset:]
 
-            if self.max_length:
+            if self.max_length is not None:
                 text = text[:self.max_length]
 
             # quite costly
@@ -1544,10 +1550,10 @@ class Preprocessor(object):
             else:
                 words = text.split()
 
-            if self.max_words:
+            if self.max_words is not None:
                 words = words[:self.max_words]
 
-            if self.max_word_size:
+            if self.max_word_size is not None:
                 words = [x[:self.max_word_size] for x in words]
 
             if self.stem:
@@ -2343,7 +2349,7 @@ def main_tune(metric, config, filename, format, y_true, sample_weight, args, pre
                     ignoreheader=ignoreheader,
                     workers=workers)
 
-            vw_args = [x for x in my_args if x not in Preprocessor.ALL_OPTIONS_DASHDASH]
+            vw_args = [x for x in my_args if getattr(x, 'opt', None) or str(x).split()[0] not in Preprocessor.ALL_OPTIONS_DASHDASH]
 
             this_best_result, this_best_options = vw_optimize_over_cv(
                 vw_filename,
@@ -2872,7 +2878,19 @@ def main(to_cleanup):
     parser.add_option('--tmp', default='.vwoptimize /tmp/vwoptimize')
     parser.add_option('--foldscript')
 
-    options, args = parser.parse_args()
+    tune_args = []
+    args = sys.argv[1:]
+    index = 0
+    while index < len(args) - 1:
+        arg = args[index]
+        if arg.lstrip('-') in Preprocessor.ALL_OPTIONS_INT and args[index + 1].endswith('?'):
+            tune_args.extend(args[index:index + 2])
+            del args[index:index + 2]
+        else:
+            index += 1
+
+    options, args = parser.parse_args(args)
+    args += tune_args
 
     globals()['MINIMUM_LOG_IMPORTANCE'] += options.lesslogs - options.morelogs + int(getattr(options, 'quiet', None) or 0) + args.count('--quiet')
     globals()['KEEPTMP'] = options.keeptmp
