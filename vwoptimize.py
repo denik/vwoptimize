@@ -611,7 +611,8 @@ def vw_cross_validation(
         trainset = trainset.replace('KFOLDS', str(kfold)).replace('VW', vw_filename)
         testset = testset.replace('KFOLDS', str(kfold)).replace('VW', vw_filename)
 
-    model_filename = get_temp_filename('model') + '.$fold' if testset else None
+    model_prefix = get_temp_filename('model') + '.$fold'
+    model_filename = model_prefix + '.bin' if testset else None
 
     if with_predictions:
         p_filename = '%s.predictions' % model_filename
@@ -624,7 +625,7 @@ def vw_cross_validation(
         r_filename = None
 
     if calc_num_features:
-        readable_model = model_filename + '.readable'
+        readable_model = model_prefix + '.readable'
     else:
         readable_model = None
 
