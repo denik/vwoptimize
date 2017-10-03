@@ -615,12 +615,12 @@ def vw_cross_validation(
     model_filename = model_prefix + '.bin' if testset else None
 
     if with_predictions:
-        p_filename = '%s.predictions' % model_filename
+        p_filename = '%s.predictions' % model_prefix
     else:
         p_filename = None
 
     if with_raw_predictions:
-        r_filename = '%s.raw' % model_filename
+        r_filename = '%s.raw' % model_prefix
     else:
         r_filename = None
 
