@@ -1777,13 +1777,25 @@ def convert_row_to_vw(row, columnspec, preprocessor, weights, named_labels, rema
         if not row.strip():
             return row
         assert '|' in row, row
-        assert columnspec is None
+        assert columnspec is None, '--columnspec not supported with .vw format'
         if preprocessor is None and not weights and not remap_label:
             return row
-        label, rest = row.split('|', 1)
 
-        if preprocessor is not None:
-            rest = preprocessor.process_text(rest)
+        items = re.split(r'(\|[^\s]*)', row)
+        label = items[0]
+
+        if preprocessor is None:
+            rest = ''.join(items[1:])
+        else:
+            if len(items) <= 2:
+                sys.exit('Cannot parse: %r' % (row, ))
+            processed = []
+            for item in items[1:]:
+                if '|' in item:
+                    processed.append(item)
+                else:
+                    processed.append(' ' + preprocessor.process_text(item) + ' ')
+            rest = ''.join(processed)
 
         if remap_label is not None:
             new_label = remap_label.get(label.strip())
@@ -1818,7 +1830,7 @@ def convert_row_to_vw(row, columnspec, preprocessor, weights, named_labels, rema
                 else:
                     label = y + ' ' + str(final_weight) + ' ' + rest_label
 
-        return label + '|' + rest
+        return label + rest.rstrip() + '\n'
 
     assert isinstance(columnspec, list), columnspec
 

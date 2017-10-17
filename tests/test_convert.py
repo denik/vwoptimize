@@ -42,6 +42,13 @@ $ vwoptimize.py -d simple.vw --tovw /dev/stdout --weight 1:2,0:0.1
 1 4.0 'second_house | price:.18 sqft:.15 age:.35 1976
 0 0.1 0.5 'third_house | price:.53 sqft:.32 age:.87 1924
 
+[fromvw_tovw__preprocessor]
+$ vwoptimize.py -d simple.vw --tovw /dev/stdout --weight 1:2,0:0.1 --lowercase
+(0)preprocessor = --lowercase
+0 0.1 | price:.23 sqft:.25 age:.05 2006
+1 4.0 'second_house | price:.18 sqft:.15 age:.35 1976
+0 0.1 0.5 'third_house | price:.53 sqft:.32 age:.87 1924
+
 [named_labels1]
 $ vwoptimize.py -d text_labels.csv --tovw /dev/stdout --named_labels welcome,bye --weight welcome:0.5
 welcome 0.5 | Hello World!
@@ -75,8 +82,12 @@ $ echo '2,hello' | vwoptimize.py --remap_label 2:-1 --tovw /dev/stdout --format 
 -1 | hello
 
 [preprocessor_vw]
-$ echo '|Hello:25\\n' | vwoptimize.py --tovw /dev/stdout --lowercase --quiet
-|hello:25
+$ echo '| Hello:25\\n' | vwoptimize.py --tovw /dev/stdout --lowercase --quiet
+| hello:25
+
+[preprocessor_vw_namespace]
+$ echo '|X Hello:25\\n' | vwoptimize.py --tovw /dev/stdout --lowercase --quiet
+|X hello:25
 
 [weight_vw]
 $ echo '1 | Hello:25\\n' | vwoptimize.py --tovw /dev/stdout --quiet --weight 1:10
