@@ -24,7 +24,6 @@ $ vwoptimize.py -d simple.csv --tovw /dev/stdout --weight_metric 1:0.5
 2 | Goodbye World. second class
 1 | hello first class again
 
-
 [fromvw_tovw]
 $ vwoptimize.py -d simple.vw --tovw /dev/stdout
 0 | price:.23 sqft:.25 age:.05 2006

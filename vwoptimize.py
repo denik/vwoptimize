@@ -2374,13 +2374,15 @@ def main_tune(metric, config, filename, format, y_true, sample_weight, args, pre
             best_preprocessor_opts = preprocessor_opts
             is_best = '*'
 
-        if preprocessor_opts:
-            log_always('Best options with %s = %s', preprocessor_opts or 'no preprocessing', this_best_options)
-        log_always('Best %s with %r = %s%s', optimization_metric, preprocessor_opts or 'no preprocessing', _frmt_score_short(this_best_result), is_best)
+        if len(preprocessor_variants) > 1:
+            if preprocessor_opts:
+                log_always('Best options with %s = %s', preprocessor_opts or 'no preprocessing', this_best_options)
+            log_always('Best %s with %r = %s%s', optimization_metric, preprocessor_opts or 'no preprocessing', _frmt_score_short(this_best_result), is_best)
         # print 'Improvement over no l1=%.4f. Improvement over initial guess=%.4f' % (no_l1_result - best_result[0], initial_l1_result - best_result[0])
 
     # XXX don't show this if preprocessor is not enabled and not tuned
-    log_always('Best preprocessor options = %s', best_preprocessor_opts or '<none>')
+    if len(preprocessor_variants) > 1:
+        log_always('Best preprocessor options = %s', best_preprocessor_opts or '<none>')
     log_always('Best vw options = %s', best_vw_options)
     log_always('Best %s = %s', optimization_metric, _frmt_score_short(best_result))
     # print 'Improvement over no l1=%.4f. Improvement over initial guess=%.4f' % (no_l1_result - best_result[0], initial_l1_result - best_result[0])

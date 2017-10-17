@@ -13,8 +13,6 @@ $ vwoptimize.py -d small_ag_news.csv --oaa 4 -b 15 --quiet -f tmp.model --writec
 $ vwoptimize.py -d small_ag_news.csv --oaa 4 -b 10/16? --quiet -f tmp.model --writeconfig tmp.config && grep vw_train_options tmp.config
 (0)Result vw --oaa 4 --quiet -b 10... vw_average_loss=0.7400
 Result vw --oaa 4 --quiet -b 16... vw_average_loss=0.6200*
-Best vw_average_loss with 'no preprocessing' = 0.6200*
-Best preprocessor options = <none>
 Best vw options = --oaa 4 --quiet -b 16
 Best vw_average_loss = 0.6200
 "vw_train_options": "--oaa 4 -b 16"
@@ -23,8 +21,6 @@ Best vw_average_loss = 0.6200
 $ vwoptimize.py -d small_ag_news.csv --oaa 4 -b 10/16? --quiet -f tmp.model --writeconfig tmp.config --kfold 10 && grep vw_train_options tmp.config
 (0)Result vw --oaa 4 --quiet -b 10... vw_average_loss=0.6400
 Result vw --oaa 4 --quiet -b 16... vw_average_loss=0.5200*
-Best vw_average_loss with 'no preprocessing' = 0.5200*
-Best preprocessor options = <none>
 Best vw options = --oaa 4 --quiet -b 16
 Best vw_average_loss = 0.5200
 "vw_train_options": "--oaa 4 -b 16"

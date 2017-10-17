@@ -31,8 +31,6 @@ $ vwoptimize.py -d simple_w.csv --columnspec y,weight,text,text -b 1/2/3? --quie
 Result vw --quiet -b 1... acc=0.0476
 Result vw --quiet -b 2... acc=0.5238*
 Result vw --quiet -b 3... acc=0.5238
-Best acc with 'no preprocessing' = 0.5238*
-Best preprocessor options = <none>
 Best vw options = --quiet -b 2
 Best acc = 0.5238
 acc = 0.52381
