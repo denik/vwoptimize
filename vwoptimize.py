@@ -452,7 +452,6 @@ def get_vw_command(
         predictions=None,
         raw_predictions=None,
         audit=False,
-        feature_mask_retrain=None,
         readable_model=None,
         only_test=False,
         fix_cache_file=False,
@@ -476,14 +475,7 @@ def get_vw_command(
     else:
         raise TypeError('Expected string or list, not %r' % (source, ))
 
-    if feature_mask_retrain:
-        if final_regressor:
-            intermediate_model_filename = final_regressor + '.feature_mask'
-        else:
-            intermediate_model_filename = get_temp_filename('feature_mask')
-        to_cleanup.append(intermediate_model_filename)
-    else:
-        intermediate_model_filename = final_regressor
+    intermediate_model_filename = final_regressor
 
     final_options = []
 
@@ -515,51 +507,15 @@ def get_vw_command(
         data_filename,
         '-i %s' % initial_regressor if initial_regressor else '',
         '-f %s' % intermediate_model_filename if intermediate_model_filename else '',
-
-        # In case of --feature_mask_retrain, we must decide whether to output predictions from first or second vw
-        # command. Since predictions of the second one will probably overfit, using the first one.
         '-p %s' % predictions if predictions else '',
         '-r %s' % raw_predictions if raw_predictions else '',
-
         '-t' if only_test else '',
     ] + vw_args
 
     if only_test:
         return _as_dict(training_command + final_options, name=name)
 
-    if not feature_mask_retrain:
-        return deque([_as_dict(training_command + final_options, name=name)])
-
-    if isinstance(feature_mask_retrain, bool):
-        feature_mask_retrain = ''
-    else:
-        if not isinstance(feature_mask_retrain, basestring):
-            raise TypeError('feature_mask_retrain must be bool or str, not %r' % (feature_mask_retrain, ))
-
-    assert data_pipeline or data_filename
-
-    assert '--feature_mask' not in vw_args, vw_args
-
-    feature_mask_retrain = feature_mask_retrain.split()
-
-    if '-c' in feature_mask_retrain or '--cache_file' in feature_mask_retrain:
-        remove_option(feature_mask_retrain, '-c', 0)
-        remove_option(feature_mask_retrain, '--cache_file', 0)
-        cache_file = final_regressor + '.cache'
-        feature_mask_retrain.extend(['--cache_file', cache_file])
-        to_cleanup.append(cache_file)
-
-    return deque([
-        _as_dict(training_command, name=name + "1"),
-        _as_dict([
-            data_pipeline,
-            VW_CMD,
-            data_filename,
-            '--quiet' if '--quiet' in vw_args else '',
-            '-f %s' % final_regressor if final_regressor else '',
-            '--feature_mask %s' % intermediate_model_filename,
-            '-i %s' % intermediate_model_filename] + feature_mask_retrain + final_options, name=name + "2"),
-    ])
+    return deque([_as_dict(training_command + final_options, name=name)])
 
 
 def vw_cross_validation(
@@ -569,7 +525,6 @@ def vw_cross_validation(
         workers=None,
         with_predictions=False,
         with_raw_predictions=False,
-        feature_mask_retrain=False,
         calc_num_features=False,
         capture_output=False):
 
@@ -638,7 +593,6 @@ def vw_cross_validation(
         final_regressor=model_filename,
         predictions=None if testset else p_filename,
         raw_predictions=None if testset else r_filename,
-        feature_mask_retrain=feature_mask_retrain,
         readable_model=readable_model,
         fix_cache_file=kfold > 1,
         name='train' if testset else 'test')
@@ -1108,7 +1062,7 @@ def get_tuning_config(config):
 
 def vw_optimize_over_cv(vw_filename, y_true, kfold, args, metric, config, sample_weight,
                         workers=None, other_metrics=[],
-                        feature_mask_retrain=False, show_num_features=False):
+                        show_num_features=False):
     # we only depend on scipy if parameter tuning is enabled
     import scipy.optimize
 
@@ -1156,7 +1110,6 @@ def vw_optimize_over_cv(vw_filename, y_true, kfold, args, metric, config, sample
                 args,
                 workers=workers,
                 with_predictions=bool(calculated_metrics),
-                feature_mask_retrain=feature_mask_retrain,
                 calc_num_features=show_num_features,
                 capture_output=set([_get_stage(m) for m in vw_metrics]))
         except KeyboardInterrupt:
@@ -2308,7 +2261,7 @@ def classification_report(y_true, y_pred, labels=None, sample_weight=None, digit
     return results
 
 
-def main_tune(metric, config, filename, format, y_true, sample_weight, args, preprocessor_base, kfold, ignoreheader, workers, feature_mask_retrain, show_num_features):
+def main_tune(metric, config, filename, format, y_true, sample_weight, args, preprocessor_base, kfold, ignoreheader, workers, show_num_features):
     if preprocessor_base is None:
         preprocessor_base = []
     else:
@@ -2374,7 +2327,6 @@ def main_tune(metric, config, filename, format, y_true, sample_weight, args, pre
                 sample_weight=sample_weight,
                 workers=workers,
                 other_metrics=other_metrics,
-                feature_mask_retrain=feature_mask_retrain,
                 show_num_features=show_num_features)
         finally:
             unlink(*to_cleanup)
@@ -2886,8 +2838,6 @@ def main(to_cleanup):
 
     # extra
     parser.add_option('--vw')
-    parser.add_option('--feature_mask_retrain', action='store_true')
-    parser.add_option('--feature_mask_retrain_args')
 
     parser.add_option('--tmpid')
     parser.add_option('--tmp', default='.vwoptimize /tmp/vwoptimize')
@@ -2943,9 +2893,6 @@ def main(to_cleanup):
 
     if options.breakdown:
         options.breakdown = re.compile(options.breakdown)
-
-    if options.feature_mask_retrain_args:
-        options.feature_mask_retrain = options.feature_mask_retrain_args
 
     config = {
         'orig_commang': ' '.join(sys.argv)
@@ -3073,7 +3020,7 @@ def main(to_cleanup):
     sample_weight = None
     need_y_true_and_y_pred = calculated_metrics or options.toperrors or options.classification_report or options.topdiffs
 
-    if need_y_true_and_y_pred or options.kfold or need_tuning or options.feature_mask_retrain is not None:
+    if need_y_true_and_y_pred or options.kfold or need_tuning:
         # cannot work with stdin, write it to a temp file
         if filename is None:
             filename = get_temp_filename(format)
@@ -3190,7 +3137,6 @@ def main(to_cleanup):
             kfold=options.kfold,
             ignoreheader=options.ignoreheader,
             workers=options.workers,
-            feature_mask_retrain=options.feature_mask_retrain,
             show_num_features=show_num_features)
         if vw_args is None:
             sys.exit('tuning failed')
@@ -3240,7 +3186,6 @@ def main(to_cleanup):
             workers=options.workers,
             with_predictions=bool(calculated_metrics) or options.predictions or options.toperrors,
             with_raw_predictions=bool(options.raw_predictions),
-            feature_mask_retrain=options.feature_mask_retrain,
             calc_num_features=show_num_features,
             capture_output=set([_get_stage(m) for m in (vw_metrics or DEFAULT_METRICS)]))
 
@@ -3329,7 +3274,6 @@ def main(to_cleanup):
             predictions=predictions_fname,
             raw_predictions=options.raw_predictions,
             audit=options.audit,
-            feature_mask_retrain=options.feature_mask_retrain,
             readable_model=readable_model)
 
         if len(vw_cmd) == 1 and vw_filename is None:

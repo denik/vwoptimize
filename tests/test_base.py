@@ -43,20 +43,6 @@ Num weight bits = 20
 loss     last          counter         weight    label  predict features
 average loss = 0.000000
 
-[feature_mask_retrain_write_model]
-$ vwoptimize.py -d small_ag_news.csv --oaa 4 -b 15 --writeconfig tmp_config -f tmp_model --quiet --morelogs --tmpid hello --feature_mask_retrain
-(0)write config = tmp_config
-+ [1] vw -d .vwoptimize/hello.1.vw -f tmp_model.tmp.feature_mask --oaa 4 -b 15 --quiet
-+ [2] vw -d .vwoptimize/hello.1.vw --quiet -f tmp_model.tmp --feature_mask tmp_model.tmp.feature_mask -i tmp_model.tmp.feature_mask
-
-[feature_mask_retrain_read_model_t]
-$ vwoptimize.py -d small_ag_news.csv --readconfig tmp_config --tmpid hey -t 2>&1 | egrep '\+|bits|loss|only'
-+ vw -d .vwoptimize/hey.1.vw -i tmp_model -t
-only testing
-Num weight bits = 15
-loss     last          counter         weight    label  predict features
-average loss = 0.000000
-
 [cv]
 $ vwoptimize.py -d small_ag_news.csv --oaa 4 --kfold 10
 (0)10-fold vw_average_loss = 0.48
