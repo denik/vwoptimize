@@ -3343,8 +3343,6 @@ def main(to_cleanup):
     if config_tmp_filename:
         os.rename(config_tmp_filename, options.writeconfig)
 
-    unlink(*to_cleanup)
-
 
 if __name__ == '__main__':
     TO_CLEANUP = []
