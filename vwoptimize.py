@@ -2000,8 +2000,6 @@ def root_mean_squared_error(*args, **kwargs):
 
 
 def is_loss(metric_name):
-    if metric_name.endswith('_w'):
-        metric_name = metric_name[:-2]
     metric_name = metrics_shortcuts.get(metric_name, metric_name)
     if 'loss' in metric_name or metric_name.endswith('_error'):
         return True
