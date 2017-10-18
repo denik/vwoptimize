@@ -894,16 +894,16 @@ def get_format(value):
     '%.0e'
 
     >>> get_format("0.")
-    '%.0g'
+    '%.0f'
 
     >>> get_format("0.5")
-    '%.1g'
+    '%.1f'
 
     >>> get_format("0.5")
-    '%.1g'
+    '%.1f'
 
     >>> get_format("0.50")
-    '%.2g'
+    '%.2f'
 
     >>> get_format('5')
     """
@@ -922,7 +922,7 @@ def get_format(value):
         return '%%.%se' % len(x)
 
     if '.' in value:
-        return '%%.%sg' % len(x)
+        return '%%.%sf' % len(x)
 
 
 DEFAULTS = {
@@ -956,10 +956,10 @@ def get_tuning_config(config):
     IntegerParam(opt='-b', init=17, min=10, max=25)
 
     >>> get_tuning_config('--learning_rate 0.5?')
-    FloatParam(opt='--learning_rate', init=0.5, min=1e-06, format='%.1g')
+    FloatParam(opt='--learning_rate', init=0.5, min=1e-06, format='%.1f')
 
     >>> get_tuning_config('--learning_rate 0.50?')
-    FloatParam(opt='--learning_rate', init=0.5, min=1e-06, format='%.2g')
+    FloatParam(opt='--learning_rate', init=0.5, min=1e-06, format='%.2f')
 
     >>> get_tuning_config('--l1 1e-07?')
     LogParam(opt='--l1', init=1e-07, min=1e-11, format='%.0e')
