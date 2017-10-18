@@ -2490,7 +2490,7 @@ def _frmt_score_short(x):
     if isinstance(x, float):
         if x < 0:
             x = -x
-        return '%.4f%s' % (x, suffix)
+        return '%.5f%s' % (x, suffix)
     return str(x)
 
 
