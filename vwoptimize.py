@@ -779,7 +779,7 @@ def _load_predictions(file, size=None, with_text=False, named_labels=None, with_
 
 class BaseParam(object):
 
-    PRINTABLE_KEYS = 'opt init min max values format extra'.split()
+    PRINTABLE_KEYS = 'opt init min max values format extra prefix'.split()
     _cast = float
 
     @classmethod
@@ -800,7 +800,7 @@ class BaseParam(object):
             return value
         return self._unpack(value)
 
-    def __init__(self, opt, init=None, min=None, max=None, format=None, pack=None, unpack=None, extra=None):
+    def __init__(self, opt, init=None, min=None, max=None, format=None, pack=None, unpack=None, extra=None, prefix=None):
         self.opt = opt
         self.init = self.cast(init)
         self.min = self.cast(min)
@@ -808,7 +808,8 @@ class BaseParam(object):
         self.format = format
         self._pack = pack
         self._unpack = unpack
-        self.extra = None
+        self.extra = extra
+        self.prefix = prefix
 
         if self.init is None:
             if self.min is not None and self.max is not None:
@@ -849,6 +850,8 @@ class BaseParam(object):
             param = self.max
         format = self.format or '%s'
         extra_arg = format % param
+        if self.prefix:
+            extra_arg = self.prefix + extra_arg
         return self.opt + ' ' + extra_arg + ' '.join(self.extra or [])
 
 
@@ -978,6 +981,15 @@ def get_tuning_config(config):
 
     >>> get_tuning_config('--loss_function /hinge/percentile?')
     ValuesParam(opt='--loss_function', values=['', 'hinge', 'percentile'])
+
+    >>> get_tuning_config('--classweight 1:0.50?')
+    FloatParam(opt='--classweight', init=0.5, format='%.2f', prefix='1:')
+
+    >>> get_tuning_config('--classweight 1:0.50?').get_extra_args(33)
+    '--classweight 1:33.00'
+
+    >>> get_tuning_config('--classweight 1:0.50?,2:12.5?')
+    [FloatParam(opt='--classweight', init=0.5, format='%.2f', prefix='1:'), FloatParam(opt='+', init=12.5, format='%.1f', prefix=',2:')]
     """
     if isinstance(config, basestring):
         config = config.split()
@@ -987,14 +999,17 @@ def get_tuning_config(config):
 
     first = config[0]
 
-    assert first.startswith('-'), config
-
     if first.startswith('--'):
         prefix = '--'
         first = first[2:]
-    else:
+    elif first.startswith('-'):
         prefix = '-'
         first = first[1:]
+    elif first.startswith('+'):
+        prefix = '+'
+        first = first[1:]
+    else:
+        raise ValueError(config)
 
     if len(config) == 1:
         first = first[:-1]
@@ -1009,7 +1024,16 @@ def get_tuning_config(config):
     if '/' in value:
         return ValuesParam(opt=config[0], values=value.split('/'))
 
+    if '?' in value:
+        values = value.split('?')
+        return [get_tuning_config(prefix + first + ' ' + x + '?') if index == 0 else get_tuning_config('+ ' + x + '?') for index, x in enumerate(values)]
+
     is_log = 'e' in value.lower()
+    prefix = None
+
+    if ':' in value:
+        prefix, value = value.rsplit(':', 1)
+        prefix += ':'
 
     if value.count('..') == 2:
         min, init, max = value.split('..')
@@ -1057,7 +1081,7 @@ def get_tuning_config(config):
     else:
         type = IntegerParam
 
-    return type(**params)
+    return type(prefix=prefix, **params)
 
 
 def vw_optimize_over_cv(vw_filename, y_true, kfold, args, metric, config, sample_weight,
@@ -1088,14 +1112,16 @@ def vw_optimize_over_cv(vw_filename, y_true, kfold, args, metric, config, sample
 
     def run(params):
         log('Parameters: %r', params)
-        args = extra_args[:]
+        args = ' '.join(extra_args[:])
 
         for param_config, param in zip(tunable_params, params):
             extra_arg = param_config.get_extra_args(param)
             if extra_arg:
-                args.append(extra_arg)
+                if extra_arg.startswith('+ '):
+                    args += extra_arg[2:]
+                else:
+                    args += ' ' + extra_arg
 
-        args = ' '.join(str(x) for x in args)
         args = re.sub('\s+', ' ', args).strip()
 
         if args in cache:
@@ -3125,9 +3151,14 @@ def main(to_cleanup):
         if arg.startswith('-'):
             next_arg = args[index + 1] if index + 1 < len(args) else ''
             if arg.endswith('?'):
-                args[index] = get_tuning_config(arg)
+                r = get_tuning_config(arg)
+                args[index] = r
             elif next_arg.endswith('?'):
-                args[index:index + 2] = [get_tuning_config(arg + ' ' + next_arg)]
+                r = get_tuning_config(arg + ' ' + next_arg)
+                if not isinstance(r, list):
+                    r = [r]
+                args[index:index + 2] = r
+                index += 1
         index += 1
 
     if need_tuning:
