@@ -3158,7 +3158,7 @@ def main(to_cleanup):
                 if not isinstance(r, list):
                     r = [r]
                 args[index:index + 2] = r
-                index += 1
+                index += len(r) - 1
         index += 1
 
     if need_tuning:
