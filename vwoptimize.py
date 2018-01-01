@@ -604,9 +604,20 @@ def vw_cross_validation(
             item['args'] += ' --quiet'
 
     if testset:
+        test_args = []
+
+        loss_function = read_argument(vw_args.split(), '--loss_function')
+
+        if loss_function:
+            test_args.append('--loss_function ' + loss_function)
+
+        if '--probabilities' in vw_args:
+            test_args.append('--probabilities')
+
         testing_command = get_vw_command(
             cleanup_tmpl,
             testset,
+            vw_args=' '.join(test_args),
             initial_regressor=model_filename,
             predictions=p_filename,
             raw_predictions=r_filename,
