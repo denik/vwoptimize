@@ -714,7 +714,7 @@ def parse_vw_output(output):
     return result
 
 
-def _load_predictions(file, size=None, with_text=False, named_labels=None, with_weights=False):
+def _load_predictions(file, size=None, with_text=False, named_labels=None, with_weights=False, examples=None):
     filename = file
     if isinstance(file, list):
         filename = file
@@ -755,6 +755,9 @@ def _load_predictions(file, size=None, with_text=False, named_labels=None, with_
         except:
             sys.stderr.write('Error while parsing %r\nin %r\n' % (line, limited_repr(filename)))
             raise
+
+        if examples is not None and len(result) >= examples:
+            break
 
     if size is not None:
         if len(result) < size:
@@ -1560,10 +1563,10 @@ class Preprocessor(object):
         return [self.process_row(row) for row in rows]
 
 
-def read_y_true(filename, format, columnspec, ignoreheader, named_labels, remap_label):
+def read_y_true(filename, format, columnspec, ignoreheader, named_labels, remap_label, examples=None):
     log('Reading labels from %s', filename or 'stdin')
     if format == 'vw':
-        return _load_predictions(filename, named_labels=named_labels, with_weights=True)
+        return _load_predictions(filename, named_labels=named_labels, with_weights=True, examples=examples)
 
     rows_source = open_anything(filename, format, ignoreheader=ignoreheader)
 
@@ -1594,6 +1597,9 @@ def read_y_true(filename, format, columnspec, ignoreheader, named_labels, remap_
         if weight_index is not None:
             w = float(row[weight_index].strip() or '1')
             weights.append(w)
+
+        if examples is not None and len(y_true) >= examples:
+            break
 
     y_true = np.array(y_true)
     if weights:
@@ -2514,10 +2520,12 @@ def _frmt_score_short(x):
     return str(x)
 
 
-def read_argument(args, name):
+def read_argument(args, name, type=None):
     assert isinstance(args, list), args
     for item in args:
         if name is None:
+            if type is not None:
+                item = type(item)
             return item
         if item == name:
             name = None
@@ -3064,9 +3072,11 @@ def main(to_cleanup):
 
     is_multiclass = any([read_argument(args, '--' + x) for x in 'oaa ect csoaa log_multi recall_tree'.split()])
 
+    examples = read_argument(args, '--examples', type=int)
+
     if need_y_true_and_y_pred:
         assert filename is not None
-        y_true, sample_weight = read_y_true(filename, format, config.get('columnspec'), options.ignoreheader, config.get('named_labels'), config.get('remap_label'))
+        y_true, sample_weight = read_y_true(filename, format, config.get('columnspec'), options.ignoreheader, config.get('named_labels'), config.get('remap_label'), examples=examples)
         if not len(y_true):
             sys.exit('%s is empty' % filename)
         if not config.get('named_labels') and not is_multiclass:
