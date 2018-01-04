@@ -1190,14 +1190,14 @@ def vw_optimize_over_cv(vw_filename, y_true, kfold, args, metrics, config, sampl
         else:
             base_args.append(param)
 
-    extra_args = ['']
+    extra_args = ''
     cache = {}
     best_result = [None, None]
     cache = {}
 
     def run(params):
         log('Parameters: %r', params)
-        args = extra_args[:]
+        args = extra_args
 
         for param_config, param in zip(tunable_params, params):
             extra_arg = param_config.get_extra_args(param)
@@ -1232,7 +1232,7 @@ def vw_optimize_over_cv(vw_filename, y_true, kfold, args, metrics, config, sampl
             continue
         already_done[params_as_str] = params
 
-        extra_args[0] = params_as_str
+        extra_args = params_as_str
         if tunable_params:
             import scipy
             scipy.optimize.minimize(run, [x.packed_init() for x in tunable_params], method='Nelder-Mead', options={'xtol': 0.001, 'ftol': 0.001})
