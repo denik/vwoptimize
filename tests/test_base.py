@@ -86,22 +86,22 @@ $ vwoptimize.py -d small_ag_news.csv --kfold 10 --oaa 4 --metric acc,num_feature
 [cv_metric_acc_num_features_vw_average_loss]
 $ vwoptimize.py -d small_ag_news.csv  --kfold 10 --oaa 4 --metric acc,num_features,vw_average_loss
 10-fold acc = 0.52
-10-fold vw_average_loss = 0.48
 10-fold num_features = 4103.2
+10-fold vw_average_loss = 0.48
 
 [cv_with_passes_and_cache_agnews_csv]
 $ vwoptimize.py -d small_ag_news.csv  --kfold 10 --oaa 4 --metric acc,num_features,vw_average_loss,vw_train_passes_used --passes 10 -c -k
 10-fold acc = 0.52
+10-fold num_features = 3791.2
 10-fold vw_average_loss = 0.48
 10-fold vw_train_passes_used = 4.2
-10-fold num_features = 3791.2
 
 [cv_with_passes_and_cache_iris_vw]
 $ vwoptimize.py -d iris.vw --kfold 10 --oaa 3 --metric acc,num_features,vw_average_loss,vw_train_passes_used --passes 10 -c -k
 10-fold acc = 0.68
+10-fold num_features = 15
 10-fold vw_average_loss = 0.32
 10-fold vw_train_passes_used = 7.4
-10-fold num_features = 15
 
 [cv_bad_metrics_multiclass_mse]
 $ vwoptimize.py -d small_ag_news.csv --kfold 10 --oaa 4 --metric mse
