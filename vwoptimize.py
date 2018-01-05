@@ -853,7 +853,7 @@ class BaseParam(object):
         init = self.pack(init)
         return init
 
-    def get_extra_args(self, param):
+    def get_extra_args(self, param, with_format=True):
         if param is None or param == '':
             return None
         param = self.unpack(param)
@@ -861,17 +861,25 @@ class BaseParam(object):
             param = self.min
         elif self.max is not None and param >= self.max:
             param = self.max
-        format = self.format or '%s'
-        extra_arg = format % param
+        if with_format:
+            format = self.format or '%s'
+            extra_arg = format % param
+        else:
+            extra_arg = str(param)
         return self.opt + ' ' + extra_arg + ' '.join(self.extra or [])
 
 
 class IntegerParam(BaseParam):
     _cast = int
 
+    def smac_def(self):
+        return ('integer', [self.pack(self.min), self.pack(self.max)], self.pack(self.init))
+
 
 class FloatParam(BaseParam):
-    pass
+
+    def smac_def(self):
+        return ('real', [self.pack(self.min), self.pack(self.max)], self.pack(self.init))
 
 
 class LogParam(FloatParam):
@@ -879,12 +887,24 @@ class LogParam(FloatParam):
     def __init__(self, opt, **kwargs):
         FloatParam.__init__(self, opt, pack=np.log, unpack=np.exp, **kwargs)
 
+    def smac_def(self):
+        return ('real', [self.pack(self.min), self.pack(self.max)], self.pack(self.init))
+
 
 class ValuesParam(BaseParam):
 
     def __init__(self, opt, values, **kwargs):
         BaseParam.__init__(self, opt, **kwargs)
         self.values = values
+
+    def smac_def(self):
+        #try:
+        #    [float(x) for x in self.values]
+        smac_type = 'ordinal'
+        #except Exception:
+        #    smac_type = 'categorical'
+        smac_values = [(x or '<None>') for x in self.values]
+        return (smac_type, smac_values, smac_values[0])
 
     def enumerate_all(self):
         return [self.get_extra_args(x) for x in self.values]
@@ -894,6 +914,9 @@ class BinaryParam(BaseParam):
 
     def __init__(self, opt, **kwargs):
         BaseParam.__init__(self, opt, **kwargs)
+
+    def smac_def(self):
+        return ('categorical', self.values, self.init)
 
     def enumerate_all(self):
         return ['', self.opt]
@@ -1089,8 +1112,8 @@ def run_single_iteration(vw_filename,
                          y_true,
                          sample_weight,
                          config,
-                         cache,
-                         best_result):
+                         cache=None,
+                         best_result=None):
     if isinstance(args, list):
         args = ' '.join(str(x) for x in args)
     else:
@@ -1122,7 +1145,8 @@ def run_single_iteration(vw_filename,
         if type(ex) is not SystemExit:
             traceback.print_exc()
         log('Result %s %s... error: %s', VW_CMD, args, ex, importance=1)
-        cache[args] = None
+        if cache is not None:
+            cache[args] = None
         return None
 
     y_pred = None
@@ -1155,7 +1179,7 @@ def run_single_iteration(vw_filename,
         result = -result
 
     is_best = ' '
-    if best_result[0] is None or result < best_result[0]:
+    if best_result is not None and (best_result[0] is None or result < best_result[0]):
         is_best = '*' if best_result[0] is not None else ' '
         best_result[0] = result
         best_result[1] = args
@@ -1191,13 +1215,12 @@ def vw_optimize_over_cv(vw_filename, y_true, kfold, args, metrics, config, sampl
             base_args.append(param)
 
     extra_args = ''
-    cache = {}
     best_result = [None, None]
     cache = {}
 
     def run(params):
         log('Parameters: %r', params)
-        args = extra_args
+        args = [extra_args]
 
         for param_config, param in zip(tunable_params, params):
             extra_arg = param_config.get_extra_args(param)
@@ -1234,12 +1257,73 @@ def vw_optimize_over_cv(vw_filename, y_true, kfold, args, metrics, config, sampl
 
         extra_args = params_as_str
         if tunable_params:
-            import scipy
+            import scipy.optimize
             scipy.optimize.minimize(run, [x.packed_init() for x in tunable_params], method='Nelder-Mead', options={'xtol': 0.001, 'ftol': 0.001})
         else:
             run([])
 
     return best_result
+
+
+pysmac_params = {}
+
+
+def smac_get_args(base_args, tunable_params, params):
+    args = []
+    for index, param in enumerate(tunable_params):
+        if params['x%s' % index] == '<None>':
+            pass
+        else:
+            args.append(param.opt + ' ' + str(param.unpack(params['x%s' % index])))
+
+    return base_args[:] + args
+
+
+def run_single_iteration_pysmac(**kwargs):
+    my_args = pysmac_params.copy()
+    base_args = my_args.pop('base_args')
+    tunable_params = my_args.pop('tunable_params')
+    best_result_share = my_args.pop('best_result_share')
+    my_args['args'] = smac_get_args(base_args, tunable_params, kwargs)
+    my_args['best_result'] = [best_result_share.value, None]
+    result = run_single_iteration(**my_args)
+    best_result_share.value = my_args['best_result'][0]
+    return result
+
+
+def vw_optimize_over_cv_smac(vw_filename, y_true, kfold, args, metrics, config, sample_weight, workers=None):
+    import pysmac
+    from multiprocessing import Value
+
+    tunable_params = []
+    base_args = []
+    assert isinstance(args, list), args
+    parameters = {}
+    index = 0
+
+    for param in args:
+        if isinstance(param, BaseParam):
+            tunable_params.append(param)
+            parameters['x%s' % index] = param.smac_def()
+            index += 1
+        else:
+            base_args.append(param)
+
+    pysmac_params['vw_filename'] = vw_filename
+    pysmac_params['kfold'] = kfold
+    pysmac_params['workers'] = workers
+    pysmac_params['metrics'] = metrics
+    pysmac_params['y_true'] = y_true
+    pysmac_params['sample_weight'] = sample_weight
+    pysmac_params['config'] = config
+    pysmac_params['tunable_params'] = tunable_params
+    pysmac_params['base_args'] = base_args
+    pysmac_params['best_result_share'] = Value('d', float('inf'))
+
+    opt = pysmac.SMAC_optimizer()
+    best_result, best_parameters = opt.minimize(run_single_iteration_pysmac, 100, parameters)
+    best_args = smac_get_args(base_args, tunable_params, best_parameters)
+    return best_result, ' '.join(best_args)
 
 
 def vw_normalize_params(params):
@@ -2322,7 +2406,8 @@ def classification_report(y_true, y_pred, labels=None, sample_weight=None, digit
     return results
 
 
-def main_tune(metric, config, filename, format, y_true, sample_weight, args, preprocessor_base, kfold, ignoreheader, workers):
+def main_tune(metric, config, filename, format, y_true, sample_weight, args, preprocessor_base, kfold, ignoreheader,
+              workers, smac=False):
     if preprocessor_base is None:
         preprocessor_base = []
     else:
@@ -2377,7 +2462,12 @@ def main_tune(metric, config, filename, format, y_true, sample_weight, args, pre
 
             vw_args = [x for x in my_args if getattr(x, 'opt', None) or str(x).split()[0] not in Preprocessor.ALL_OPTIONS_DASHDASH]
 
-            this_best_result, this_best_options = vw_optimize_over_cv(
+            if smac:
+                opt = vw_optimize_over_cv_smac
+            else:
+                opt = vw_optimize_over_cv
+
+            this_best_result, this_best_options = opt(
                 vw_filename,
                 y_true,
                 kfold,
@@ -2909,6 +2999,8 @@ def main(to_cleanup):
     parser.add_option('--tmp', default='.vwoptimize /tmp/vwoptimize')
     parser.add_option('--foldscript')
 
+    parser.add_option('--smac', action='store_true')
+
     tune_args = []
     args = sys.argv[1:]
     index = 0
@@ -3195,7 +3287,8 @@ def main(to_cleanup):
             preprocessor_base=preprocessor,
             kfold=options.kfold,
             ignoreheader=options.ignoreheader,
-            workers=options.workers)
+            workers=options.workers,
+            smac=options.smac)
         if vw_args is None:
             sys.exit('tuning failed')
         config['preprocessor'] = str(preprocessor) if preprocessor else None
