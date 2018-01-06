@@ -177,7 +177,7 @@ $ head -n 50 iris.vw | vwoptimize.py -d - --metric vw_train_weighted_example_sum
 [kfold_too_many]
 $ head -n 50 iris.vw | vwoptimize.py -d - --metric vw_train_weighted_example_sum,vw_average_loss --oaa 3 --kfold 51
 51-fold vw_train_weighted_example_sum = 49.019608
-51-fold vw_average_loss = nan
+51-fold vw_average_loss = None
 
 [cv_predictions_stdout]
 $ head -n 10 iris.vw | vwoptimize.py -d - --kfold 10 --oaa 3 -p /dev/stdout
@@ -269,7 +269,7 @@ $ printf '1 | hello\\n-1 | world' | vwoptimize.py -d - --kfold 2 -r /dev/stdout 
 
 [kfold3]
 $ printf '1 | hello\\n-1 | world' | vwoptimize.py -d - --kfold 3
-3-fold vw_average_loss = nan
+3-fold vw_average_loss = None
 
 [kfold2_with_holdout]
 $ vwoptimize.py -d iris.vw --kfold 2 --passes 2 -c -k --metric vw_train_average_loss,vw_average_loss
