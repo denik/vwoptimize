@@ -18,9 +18,9 @@ before_install:
  - vw --version
 install:
  - pip install -r requirements.txt
- - pip install flake8
+ - pip install flake8 commandlineapp
  - pip install hanziconv
 script:
  - python -c 'import vwoptimize, doctest, sys; sys.exit(doctest.testmod(vwoptimize).failed)'
  - cd tests && python ./shell-doctest --verbose=2 test && cd ..
- - flake8 --max-line-length=1000 --ignore E402 *.py tests/
+ - flake8 --max-line-length=1000 --ignore E402 *.py tests/*.py
