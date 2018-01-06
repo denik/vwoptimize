@@ -1231,8 +1231,6 @@ MARKER_BEST = '** '
 
 
 def vw_optimize_over_cv(vw_filename, y_true, kfold, args, metrics, config, sample_weight, workers, best_result):
-    import scipy.optimize
-
     gridsearch_params = []
     tunable_params = []
     base_args = []
