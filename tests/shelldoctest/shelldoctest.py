@@ -20,13 +20,20 @@ def system_command(cmd, shell="bash"):
     p = subprocess.Popen('%(shell)s -c "%(cmd)s"' % vars(),
                          shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     status, stdout, stderr = p.wait(), p.stdout.read().strip(), p.stderr.read().strip()
-    if status == 0 and stderr == "":
-        format = "%(stdout)s"
-    elif stdout != "":
-        format = "(%(status)d)%(stderr)s\n%(stdout)s"
+
+    if status == 0:
+        result = []
     else:
-        format = "(%(status)d)%(stderr)s"
-    result = format % vars()
+        result = ['(%s)' % status]
+
+    if stderr:
+        result.append(stderr)
+
+    if stdout:
+        result.append(stdout)
+
+    result = '\n'.join(result)
+
     if sys.version_info < (2, 5):
         print result
         return
