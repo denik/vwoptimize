@@ -1074,10 +1074,132 @@ def get_tuning_config(config):
     return type(**params)
 
 
-def vw_optimize_over_cv(vw_filename, y_true, kfold, args, metric, config, sample_weight,
-                        workers=None, other_metrics=[],
-                        show_num_features=False):
-    # we only depend on scipy if parameter tuning is enabled
+def split_metrics(metrics):
+    show_num_features = 'num_features' in metrics
+    calculated_metrics = [x for x in metrics if not x.startswith('vw') and x != 'num_features']
+    vw_metrics = [x for x in metrics if x.startswith('vw')]
+    return calculated_metrics, vw_metrics, show_num_features
+
+
+def best_result_update(best_result, result, args):
+    if best_result is None:
+        return ''
+    best_marker = ''
+    for marker, (best_value, best_args) in best_result.items():
+        if result > best_value:
+            continue
+        best_result[marker] = (result, args)
+        if (len(marker), marker) > (len(best_marker), best_marker):
+            best_marker = marker
+
+    return best_marker
+
+
+table = None
+
+
+def run_single_iteration(vw_filename,
+                         kfold,
+                         args,
+                         workers,
+                         metrics,
+                         y_true,
+                         sample_weight,
+                         config,
+                         cache=None,
+                         best_result=None):
+    global table
+
+    if isinstance(args, list):
+        args = ' '.join(str(x) for x in args)
+    else:
+        assert isinstance(args, str), args
+
+    args = re.sub('\s+', ' ', args).strip()
+
+    if cache is not None and args in cache:
+        return cache[args]
+
+    calculated_metrics, vw_metrics, show_num_features = split_metrics(metrics)
+    metric = metrics[0]
+
+    log('Trying %s %s...', VW_CMD, args)
+
+    try:
+        y_pred_text, raw_pred_text, num_features, outputs = vw_cross_validation(
+            vw_filename,
+            kfold,
+            args,
+            workers=workers,
+            with_predictions=bool(calculated_metrics),
+            calc_num_features=show_num_features,
+            capture_output=set([_get_stage(m) for m in vw_metrics]))
+    except KeyboardInterrupt:
+        raise
+    except BaseException, ex:
+        if type(ex) is not SystemExit:
+            traceback.print_exc()
+        log('Result %s %s... error: %s', VW_CMD, args, ex, importance=1)
+        if cache is not None:
+            cache[args] = None
+        return None
+
+    y_pred = None
+
+    if y_true is not None:
+        if calculated_metrics and len(y_true) != len(y_pred_text):
+            sys.exit('Internal error: expected %r predictions, got %r' % (len(y_true), len(y_pred_text)))
+
+        if raw_pred_text and len(y_true) != len(raw_pred_text):
+            sys.exit('Internal error: expected %r raw predictions, got %r' % (len(y_true), len(raw_pred_text)))
+
+        y_pred = _load_predictions(y_pred_text, size=len(y_true), named_labels=config.get('named_labels'))
+
+    result = calculate_or_extract_score(metric, y_true, y_pred, config, outputs, sample_weight)
+
+    if isinstance(result, basestring):
+        sys.exit('Cannot calculate %r: %s' % (metric, result))
+
+    if isinstance(result, list):
+        try:
+            result, suffix = mean_h(result)
+        except Exception:
+            log_always("Failed to calculate mean from %r", result)
+            raise
+
+    if not isinstance(result, (int, long, float)):
+        sys.exit('Bad metric for tuning: %s (value=%r)' % (metric, result))
+
+    if not is_loss(metric):
+        result = -result
+
+    is_best = best_result_update(best_result, result, args) or ' '
+    values = [_frmt_score(calculate_or_extract_score(m, y_true, y_pred, config, outputs, sample_weight, num_features=num_features)) for m in metrics]
+    values[1:] = [x.split()[0].rstrip(':') for x in values[1:]]
+    values[0] += is_best
+
+    if table is None or len(table) != len(values):
+        table = [len(x) for x in values]
+    else:
+        table = [max(len(x), t) for (x, t) in zip(values, table)]
+
+    new_values = []
+    for value, size in zip(values, table):
+        value += ' ' * (size - len(value))
+        new_values.append(value)
+
+    results = ['%s=%s' % (x, y) for (x, y) in zip(metrics, new_values)]
+    results = '  '.join(results)
+    results = results.rstrip()
+    log('Result %s %s... %s', VW_CMD, args, results, importance=1 + int(bool(is_best)))
+
+    if cache is not None:
+        cache[args] = result
+
+    return result
+
+
+def vw_optimize_over_cv(vw_filename, y_true, kfold, args, metrics, config, sample_weight, workers=None, best_result=None):
     import scipy.optimize
 
     gridsearch_params = []
@@ -1093,104 +1215,44 @@ def vw_optimize_over_cv(vw_filename, y_true, kfold, args, metric, config, sample
         else:
             base_args.append(param)
 
-    extra_args = ['']
+    extra_args = ''
+    if best_result is None:
+        best_result = {}
     cache = {}
-    best_result = [None, None]
-
-    calculated_metrics = [x for x in [metric] + other_metrics if not x.startswith('vw')]
-    vw_metrics = [x for x in [metric] + other_metrics if x.startswith('vw')]
 
     def run(params):
         log('Parameters: %r', params)
-        args = extra_args[:]
+        args = [extra_args]
 
         for param_config, param in zip(tunable_params, params):
             extra_arg = param_config.get_extra_args(param)
             if extra_arg:
                 args.append(extra_arg)
 
-        args = ' '.join(str(x) for x in args)
-        args = re.sub('\s+', ' ', args).strip()
+        result = run_single_iteration(
+            vw_filename,
+            kfold,
+            args,
+            workers,
+            metrics,
+            y_true,
+            sample_weight,
+            config,
+            cache,
+            best_result)
 
-        if args in cache:
-            return cache[args]
-
-        log('Trying %s %s...', VW_CMD, args)
-
-        try:
-            y_pred_text, raw_pred_text, num_features, outputs = vw_cross_validation(
-                vw_filename,
-                kfold,
-                args,
-                workers=workers,
-                with_predictions=bool(calculated_metrics),
-                calc_num_features=show_num_features,
-                capture_output=set([_get_stage(m) for m in vw_metrics]))
-        except KeyboardInterrupt:
-            raise
-        except BaseException, ex:
-            if type(ex) is not SystemExit:
-                traceback.print_exc()
-            log('Result %s %s... error: %s', VW_CMD, args, ex, importance=1)
-            cache[args] = 0.0
-            return 0.0
-
-        y_pred = None
-
-        if y_true is not None:
-            if calculated_metrics and len(y_true) != len(y_pred_text):
-                sys.exit('Internal error: expected %r predictions, got %r' % (len(y_true), len(y_pred_text)))
-
-            if raw_pred_text and len(y_true) != len(raw_pred_text):
-                sys.exit('Internal error: expected %r raw predictions, got %r' % (len(y_true), len(raw_pred_text)))
-
-            y_pred = _load_predictions(y_pred_text, size=len(y_true), named_labels=config.get('named_labels'))
-
-        result = calculate_or_extract_score(metric, y_true, y_pred, config, outputs, sample_weight)
-
-        if isinstance(result, basestring):
-            sys.exit('Cannot calculate %r: %s' % (metric, result))
-
-        if isinstance(result, list):
-            try:
-                result, suffix = mean_h(result)
-            except Exception:
-                log_always("Failed to calculate mean from %r", result)
-                raise
-
-        if not isinstance(result, (int, long, float)):
-            sys.exit('Bad metric for tuning: %s (value=%r)' % (metric, result))
-
-        if not is_loss(metric):
-            result = -result
-
-        is_best = ' '
-        if best_result[0] is None or result < best_result[0]:
-            is_best = '*' if best_result[0] is not None else ' '
-            best_result[0] = result
-            best_result[1] = args
-
-        other_scores = [(m, _frmt_score_short(calculate_or_extract_score(m, y_true, y_pred, config, outputs, sample_weight))) for m in other_metrics]
-        other_results = ' '.join(['%s=%s' % x for x in other_scores])
-
-        if num_features:
-            other_results += ' num_features=%s' % _frmt_score(num_features)
-
-        if other_results:
-            other_results = '  ' + other_results
-
-        other_results = (is_best + other_results).rstrip()
-
-        log('Result %s %s... %s=%s%s', VW_CMD, args, metric, _frmt_score_short(result), other_results, importance=1 + int(bool(is_best)))
-
-        cache[args] = result
         return result
 
     already_done = {}
 
     log('Grid-search: %r', gridsearch_params)
 
+    best_result['* '] = (float('inf'), None)
+
     for params in expand(gridsearch_params):
+        if tunable_params:
+            best_result['+'] = (float('inf'), None)
+
         params_normalized = vw_normalize_params(base_args + params)
         if params_normalized != params:
             log('Normalized params %r %r -> %r', base_args, params, params_normalized, importance=-1)
@@ -1200,11 +1262,11 @@ def vw_optimize_over_cv(vw_filename, y_true, kfold, args, metric, config, sample
             continue
         already_done[params_as_str] = params
 
-        extra_args[0] = params_as_str
+        extra_args = params_as_str
         run([None] * len(tunable_params))
         scipy.optimize.minimize(run, [x.packed_init() for x in tunable_params], method='Nelder-Mead', options={'xtol': 0.001, 'ftol': 0.001})
 
-    return best_result
+    return best_result['* ']
 
 
 def vw_normalize_params(params):
@@ -2022,7 +2084,9 @@ def is_loss(metric_name):
         return True
 
 
-def calculate_or_extract_score(metric, y_true, y_pred, config, outputs, sample_weight):
+def calculate_or_extract_score(metric, y_true, y_pred, config, outputs, sample_weight, num_features=None):
+    if metric == 'num_features':
+        return num_features
     try:
         if metric.startswith('vw'):
             return extract_score(metric, outputs)
@@ -2285,7 +2349,7 @@ def classification_report(y_true, y_pred, labels=None, sample_weight=None, digit
     return results
 
 
-def main_tune(metric, config, filename, format, y_true, sample_weight, args, preprocessor_base, kfold, ignoreheader, workers, show_num_features):
+def main_tune(metric, config, filename, format, y_true, sample_weight, args, preprocessor_base, kfold, ignoreheader, workers):
     if preprocessor_base is None:
         preprocessor_base = []
     else:
@@ -2295,7 +2359,6 @@ def main_tune(metric, config, filename, format, y_true, sample_weight, args, pre
         metric = DEFAULT_METRICS
 
     optimization_metric = metric[0]
-    other_metrics = metric[1:]
 
     best_preprocessor_opts = None
     best_vw_options = None
@@ -2346,12 +2409,10 @@ def main_tune(metric, config, filename, format, y_true, sample_weight, args, pre
                 y_true,
                 kfold,
                 vw_args,
-                optimization_metric,
+                metric,
                 config,
                 sample_weight=sample_weight,
-                workers=workers,
-                other_metrics=other_metrics,
-                show_num_features=show_num_features)
+                workers=workers)
         finally:
             unlink(*to_cleanup)
 
@@ -2365,14 +2426,14 @@ def main_tune(metric, config, filename, format, y_true, sample_weight, args, pre
         if len(preprocessor_variants) > 1:
             if preprocessor_opts:
                 log_always('Best options with %s = %s', preprocessor_opts or 'no preprocessing', this_best_options)
-            log_always('Best %s with %r = %s%s', optimization_metric, preprocessor_opts or 'no preprocessing', _frmt_score_short(this_best_result), is_best)
+            log_always('Best %s with %r = %s%s', optimization_metric, preprocessor_opts or 'no preprocessing', _frmt_score(this_best_result), is_best)
         # print 'Improvement over no l1=%.4f. Improvement over initial guess=%.4f' % (no_l1_result - best_result[0], initial_l1_result - best_result[0])
 
     # XXX don't show this if preprocessor is not enabled and not tuned
     if len(preprocessor_variants) > 1:
         log_always('Best preprocessor options = %s', best_preprocessor_opts or '<none>')
     log_always('Best vw options = %s', best_vw_options)
-    log_always('Best %s = %s', optimization_metric, _frmt_score_short(best_result))
+    log_always('Best %s = %s', optimization_metric, _frmt_score(best_result))
     # print 'Improvement over no l1=%.4f. Improvement over initial guess=%.4f' % (no_l1_result - best_result[0], initial_l1_result - best_result[0])
     preprocessor = Preprocessor.from_options(best_preprocessor_opts)
     return best_vw_options, preprocessor
@@ -2501,22 +2562,8 @@ def _frmt_score(x):
         if '.' in x:
             x = x.rstrip('0').rstrip('.')
         return x + suffix
-    return str(x)
-
-
-def _frmt_score_short(x):
-    suffix = ''
-    if isinstance(x, basestring):
-        return x.strip().split()[0].strip(':')
-    if isinstance(x, list):
-        if METRIC_FORMAT == 'mean':
-            x, suffix = mean_h(x)
-        else:
-            return str(x)
-    if isinstance(x, float):
-        if x < 0:
-            x = -x
-        return '%.5f%s' % (x, suffix)
+    if x is None:
+        return 'nan'
     return str(x)
 
 
@@ -2654,7 +2701,7 @@ def get_breakdown_group(breakdown_re, item):
         return group
 
 
-def log_report_one(prefix, metrics, y_true, y_pred, sample_weight, config, classification_report, outputs=None, mask=None):
+def log_report_one(prefix, metrics, y_true, y_pred, sample_weight, config, classification_report, outputs=None, mask=None, num_features=None):
 
     if mask is not None:
         y_true = np.ma.MaskedArray(y_true, mask=mask).compressed()
@@ -2663,7 +2710,7 @@ def log_report_one(prefix, metrics, y_true, y_pred, sample_weight, config, class
         assert y_true.shape == y_pred.shape, (y_true.shape, y_pred.shape)
 
     for metric in metrics:
-        log_always('%s%s = %s', prefix, metric, _frmt_score(calculate_or_extract_score(metric, y_true, y_pred, config, outputs=outputs, sample_weight=sample_weight)))
+        log_always('%s%s = %s', prefix, metric, _frmt_score(calculate_or_extract_score(metric, y_true, y_pred, config, outputs=outputs, sample_weight=sample_weight, num_features=num_features)))
 
     if classification_report:
         assert y_true is not None
@@ -2688,8 +2735,8 @@ def parse_number_or_fraction(x, total=None):
     return x
 
 
-def log_report(prefix, metrics, breakdown_re, breakdown_top, breakdown_min, y_true, y_pred, y_pred_text, sample_weight, config, classification_report, outputs=None):
-    log_report_one(prefix, metrics, y_true, y_pred, sample_weight, config, classification_report, outputs=outputs)
+def log_report(prefix, metrics, breakdown_re, breakdown_top, breakdown_min, y_true, y_pred, y_pred_text, sample_weight, config, classification_report, outputs=None, num_features=None):
+    log_report_one(prefix, metrics, y_true, y_pred, sample_weight, config, classification_report, outputs=outputs, num_features=num_features)
 
     if breakdown_top and not breakdown_re:
         breakdown_re = re.compile('.+')
@@ -3032,16 +3079,7 @@ def main(to_cleanup):
             break
 
     options.metric = _make_proper_list(options.metric) or []
-    show_num_features = 'num_features' in options.metric
-    options.metric = [x for x in options.metric if 'num_features' != x]
-
-    # there are metrics that we calculate from y_true and y_pred, these are listed below. Using these requires extra
-    # pass over input to read y_true
-    calculated_metrics = [x for x in options.metric if not x.startswith('vw')]
-
-    # these are the metrics we extract from vw output (for "average loss" use "vw_average_loss")
-    vw_metrics = [x for x in options.metric if x.startswith('vw')]
-
+    calculated_metrics, vw_metrics, show_num_features = split_metrics(options.metric)
     y_true = None
     sample_weight = None
     need_y_true_and_y_pred = calculated_metrics or options.toperrors or options.classification_report or options.topdiffs
@@ -3164,8 +3202,7 @@ def main(to_cleanup):
             preprocessor_base=preprocessor,
             kfold=options.kfold,
             ignoreheader=options.ignoreheader,
-            workers=options.workers,
-            show_num_features=show_num_features)
+            workers=options.workers)
         if vw_args is None:
             sys.exit('tuning failed')
         config['preprocessor'] = str(preprocessor) if preprocessor else None
@@ -3230,10 +3267,8 @@ def main(to_cleanup):
                    sample_weight=sample_weight,
                    config=config,
                    classification_report=options.classification_report,
-                   outputs=outputs)
-
-        if show_num_features and num_features:
-            log_always('%s-fold num_features = %s', options.kfold, _frmt_score(num_features))
+                   outputs=outputs,
+                   num_features=num_features)
 
         if options.predictions:
             write_file(options.predictions, cv_pred_text)
