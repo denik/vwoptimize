@@ -898,11 +898,7 @@ class ValuesParam(BaseParam):
         self.values = values
 
     def smac_def(self):
-        #try:
-        #    [float(x) for x in self.values]
         smac_type = 'ordinal'
-        #except Exception:
-        #    smac_type = 'categorical'
         smac_values = [(x or '<None>') for x in self.values]
         return (smac_type, smac_values, smac_values[0])
 
@@ -1104,6 +1100,23 @@ def split_metrics(metrics):
     return calculated_metrics, vw_metrics, show_num_features
 
 
+def best_result_update(best_result, result, args):
+    if best_result is None:
+        return ''
+    best_marker = ''
+    for marker, (best_value, best_args) in best_result.items():
+        if result > best_value:
+            continue
+        best_result[marker] = (result, args)
+        if (len(marker), marker) > (len(best_marker), best_marker):
+            best_marker = marker
+
+    return best_marker
+
+
+table = None
+
+
 def run_single_iteration(vw_filename,
                          kfold,
                          args,
@@ -1114,6 +1127,8 @@ def run_single_iteration(vw_filename,
                          config,
                          cache=None,
                          best_result=None):
+    global table
+
     if isinstance(args, list):
         args = ' '.join(str(x) for x in args)
     else:
@@ -1126,7 +1141,6 @@ def run_single_iteration(vw_filename,
 
     calculated_metrics, vw_metrics, show_num_features = split_metrics(metrics)
     metric = metrics[0]
-    other_metrics = metrics[1:]
 
     log('Trying %s %s...', VW_CMD, args)
 
@@ -1178,21 +1192,25 @@ def run_single_iteration(vw_filename,
     if not is_loss(metric):
         result = -result
 
-    is_best = ' '
-    if best_result is not None and (best_result[0] is None or result < best_result[0]):
-        is_best = '*' if best_result[0] is not None else ' '
-        best_result[0] = result
-        best_result[1] = args
+    is_best = best_result_update(best_result, result, args) or ' '
+    values = [_frmt_score(calculate_or_extract_score(m, y_true, y_pred, config, outputs, sample_weight, num_features=num_features)) for m in metrics]
+    values[1:] = [x.split()[0].rstrip(':') for x in values[1:]]
+    values[0] += is_best
 
-    other_scores = [(m, _frmt_score_short(calculate_or_extract_score(m, y_true, y_pred, config, outputs, sample_weight, num_features=num_features), m)) for m in other_metrics]
-    other_results = ' '.join(['%s=%s' % x for x in other_scores])
+    if table is None or len(table) != len(values):
+        table = [len(x) for x in values]
+    else:
+        table = [max(len(x), t) for (x, t) in zip(values, table)]
 
-    if other_results:
-        other_results = '  ' + other_results
+    new_values = []
+    for value, size in zip(values, table):
+        value += ' ' * (size - len(value))
+        new_values.append(value)
 
-    other_results = (is_best + other_results).rstrip()
-
-    log('Result %s %s... %s=%s%s', VW_CMD, args, metric, _frmt_score_short(result), other_results, importance=1 + int(bool(is_best)))
+    results = ['%s=%s' % (key, value) for (key, value) in zip(metrics, new_values)]
+    results = '  '.join(results)
+    results = results.rstrip()
+    log('Result %s %s... %s', VW_CMD, args, results, importance=1 + int(bool(is_best)))
 
     if cache is not None:
         cache[args] = result
@@ -1200,7 +1218,7 @@ def run_single_iteration(vw_filename,
     return result
 
 
-def vw_optimize_over_cv(vw_filename, y_true, kfold, args, metrics, config, sample_weight, workers=None):
+def vw_optimize_over_cv(vw_filename, y_true, kfold, args, metrics, config, sample_weight, workers=None, best_result=None):
     gridsearch_params = []
     tunable_params = []
     base_args = []
@@ -1215,7 +1233,8 @@ def vw_optimize_over_cv(vw_filename, y_true, kfold, args, metrics, config, sampl
             base_args.append(param)
 
     extra_args = ''
-    best_result = [None, None]
+    if best_result is None:
+        best_result = {}
     cache = {}
 
     def run(params):
@@ -1243,9 +1262,17 @@ def vw_optimize_over_cv(vw_filename, y_true, kfold, args, metrics, config, sampl
 
     already_done = {}
 
+    gridsearch_params = expand(gridsearch_params, withextra=True)
     log('Grid-search: %r', gridsearch_params)
+    initial_params_init = [x.packed_init() for x in tunable_params]
+    initial_params_db = Simple1NN()
 
-    for params in expand(gridsearch_params):
+    best_result['* '] = (float('inf'), None)
+
+    for _score, params, params_vector in gridsearch_params:
+        if tunable_params:
+            best_result['+'] = (float('inf'), None)
+
         params_normalized = vw_normalize_params(base_args + params)
         if params_normalized != params:
             log('Normalized params %r %r -> %r', base_args, params, params_normalized, importance=-1)
@@ -1258,11 +1285,42 @@ def vw_optimize_over_cv(vw_filename, y_true, kfold, args, metrics, config, sampl
         extra_args = params_as_str
         if tunable_params:
             import scipy.optimize
-            scipy.optimize.minimize(run, [x.packed_init() for x in tunable_params], method='Nelder-Mead', options={'xtol': 0.001, 'ftol': 0.001})
+
+            results = initial_params_db.find_nearest(params_vector)
+            if results:
+                t_params = np.mean(results, axis=0)
+            else:
+                t_params = initial_params_init
+
+            optresult = scipy.optimize.minimize(run, t_params, method='Nelder-Mead', options={'xtol': 0.001, 'ftol': 0.001})
+            log('', importance=1)
+            initial_params_db.add_observation(np.array(params_vector), optresult.x)
         else:
             run([])
 
-    return best_result
+    return best_result['* ']
+
+
+class Simple1NN(object):
+
+    def __init__(self):
+        self.observations = []
+
+    def add_observation(self, x, y):
+        self.observations.append((x, y))
+
+    def find_nearest(self, query_x):
+        nearest_items = []
+        nearest_distance = float('inf')
+        for x, y in self.observations:
+            dist = np.sum(np.abs(x - query_x))
+            # print 'query=%s x=%s y=%s dist=%s' % (query_x, x, y, dist)
+            if dist < nearest_distance:
+                nearest_distance = dist
+                nearest_items = [y]
+            elif dist == nearest_distance:
+                nearest_items.append(y)
+        return nearest_items
 
 
 pysmac_params = {}
@@ -1345,14 +1403,17 @@ def vw_normalize_params(params):
     return params.split()
 
 
-def expand(gridsearch_params, only=None):
-    for item in _expand(gridsearch_params, only=only):
-        yield [x for x in item if x]
+def expand(gridsearch_params, only=None, withextra=False):
+    result = list(_expand(gridsearch_params, only=only))
+    result.sort()
+    if withextra:
+        return result
+    return [x[1] for x in result]
 
 
-def _expand(gridsearch_params, only=None):
+def _expand(gridsearch_params, only=None, score_mult=1):
     if not gridsearch_params:
-        yield []
+        yield (0, [], [])
         return
 
     first_arg = gridsearch_params[0]
@@ -1365,13 +1426,18 @@ def _expand(gridsearch_params, only=None):
         skip = False
 
     if skip:
-        for inner in _expand(gridsearch_params[1:], only=only):
-            yield [first_arg] + inner
+        for inner_score, inner_cmd, inner_vector in _expand(gridsearch_params[1:], only=only, score_mult=score_mult):
+            yield (inner_score, _filter([first_arg] + inner_cmd), inner_vector)
         return
 
-    for first_arg_variant in first_arg.enumerate_all():
-        for inner in _expand(gridsearch_params[1:], only=only):
-            yield [first_arg_variant] + inner
+    for index, first_arg_variant in enumerate(first_arg.enumerate_all()):
+        for inner_score, inner, inner_vector in _expand(gridsearch_params[1:], only=only, score_mult=score_mult * 1.01):
+            new_inner_vector = [index] + inner_vector
+            yield (index * score_mult + inner_score, _filter([first_arg_variant] + inner), new_inner_vector)
+
+
+def _filter(lst):
+    return [x for x in lst if x]
 
 
 def get_language(doc):
@@ -2423,7 +2489,7 @@ def main_tune(metric, config, filename, format, y_true, sample_weight, args, pre
     best_result = None
     already_done = {}
 
-    preprocessor_variants = list(expand(args, only=Preprocessor.ALL_OPTIONS_DASHDASH))
+    preprocessor_variants = expand(args, only=Preprocessor.ALL_OPTIONS_DASHDASH)
     log('Trying preprocessor variants: %s', pprint.pformat(preprocessor_variants), importance=-1)
 
     for my_args in preprocessor_variants:
@@ -2489,14 +2555,14 @@ def main_tune(metric, config, filename, format, y_true, sample_weight, args, pre
         if len(preprocessor_variants) > 1:
             if preprocessor_opts:
                 log_always('Best options with %s = %s', preprocessor_opts or 'no preprocessing', this_best_options)
-            log_always('Best %s with %r = %s%s', optimization_metric, preprocessor_opts or 'no preprocessing', _frmt_score_short(this_best_result), is_best)
+            log_always('Best %s with %r = %s%s', optimization_metric, preprocessor_opts or 'no preprocessing', _frmt_score(this_best_result), is_best)
         # print 'Improvement over no l1=%.4f. Improvement over initial guess=%.4f' % (no_l1_result - best_result[0], initial_l1_result - best_result[0])
 
     # XXX don't show this if preprocessor is not enabled and not tuned
     if len(preprocessor_variants) > 1:
         log_always('Best preprocessor options = %s', best_preprocessor_opts or '<none>')
     log_always('Best vw options = %s', best_vw_options)
-    log_always('Best %s = %s', optimization_metric, _frmt_score_short(best_result))
+    log_always('Best %s = %s', optimization_metric, _frmt_score(best_result))
     # print 'Improvement over no l1=%.4f. Improvement over initial guess=%.4f' % (no_l1_result - best_result[0], initial_l1_result - best_result[0])
     preprocessor = Preprocessor.from_options(best_preprocessor_opts)
     return best_vw_options, preprocessor
@@ -2627,26 +2693,6 @@ def _frmt_score(x):
         return x + suffix
     if x is None:
         return 'nan'
-    return str(x)
-
-
-def _frmt_score_short(x, m=None):
-    suffix = ''
-    if isinstance(x, basestring):
-        return x.strip().split()[0].strip(':')
-    if isinstance(x, list):
-        if METRIC_FORMAT == 'mean':
-            x, suffix = mean_h(x)
-        else:
-            return str(x)
-    if isinstance(x, float):
-        if x < 0:
-            x = -x
-        if m != 'num_features':
-            result = '%.5f%s' % (x, suffix)
-        else:
-            result = '%g%s' % (x, suffix)
-        return result
     return str(x)
 
 
