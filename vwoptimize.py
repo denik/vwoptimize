@@ -1086,7 +1086,7 @@ def best_result_update(best_result, result, args):
         return ''
     best_marker = ''
     for marker, (best_value, best_args) in best_result.items():
-        if result > best_value:
+        if result >= best_value:
             continue
         best_result[marker] = (result, args)
         if (len(marker), marker) > (len(best_marker), best_marker):
@@ -1106,8 +1106,9 @@ def run_single_iteration(vw_filename,
                          y_true,
                          sample_weight,
                          config,
-                         cache=None,
-                         best_result=None):
+                         cache,
+                         best_result,
+                         stats):
     global table
 
     if isinstance(args, list):
@@ -1173,7 +1174,14 @@ def run_single_iteration(vw_filename,
     if not is_loss(metric):
         result = -result
 
-    is_best = best_result_update(best_result, result, args) or ' '
+    is_best = best_result_update(best_result, result, args)
+
+    if is_best:
+        stats['no_improvement_counter'] = 0
+    else:
+        stats['no_improvement_counter'] = stats.get('no_improvement_counter', 0) + 1
+
+    is_best = is_best or ' '
     values = [_frmt_score(calculate_or_extract_score(m, y_true, y_pred, config, outputs, sample_weight, num_features=num_features)) for m in metrics]
     values[1:] = [x.split()[0].rstrip(':') for x in values[1:]]
     values[0] += is_best
@@ -1191,15 +1199,38 @@ def run_single_iteration(vw_filename,
     results = ['%s=%s' % (x, y) for (x, y) in zip(metrics, new_values)]
     results = '  '.join(results)
     results = results.rstrip()
+
+    local_best = best_result[MARKER_LOCALBEST][0]
+    global_best = best_result[MARKER_BEST][0]
+    branch_improvement = (global_best - local_best) / min(abs(global_best), abs(local_best))
+
     log('Result %s %s... %s', VW_CMD, args, results, importance=1 + int(bool(is_best)))
 
     if cache is not None:
         cache[args] = result
 
+    if stats['no_improvement_counter'] >= 5 and branch_improvement < -0.1:
+        raise InterruptOptimization('No improvement for 5 iterations')
+
+    if stats['no_improvement_counter'] >= 10 and branch_improvement < -0.05:
+        raise InterruptOptimization('No improvement for 10 iterations')
+
+    if stats['no_improvement_counter'] >= 15 and branch_improvement < 0:
+        raise InterruptOptimization('No improvement for 15 iterations')
+
     return result
 
 
-def vw_optimize_over_cv(vw_filename, y_true, kfold, args, metrics, config, sample_weight, workers=None, best_result=None):
+class InterruptOptimization(Exception):
+    pass
+
+
+MARKER_LOCALBEST = '+'
+MARKER_BRANCHBEST = '* '
+MARKER_BEST = '** '
+
+
+def vw_optimize_over_cv(vw_filename, y_true, kfold, args, metrics, config, sample_weight, workers, best_result):
     import scipy.optimize
 
     gridsearch_params = []
@@ -1219,6 +1250,7 @@ def vw_optimize_over_cv(vw_filename, y_true, kfold, args, metrics, config, sampl
     if best_result is None:
         best_result = {}
     cache = {}
+    stats = {}
 
     def run(params):
         log('Parameters: %r', params)
@@ -1239,34 +1271,80 @@ def vw_optimize_over_cv(vw_filename, y_true, kfold, args, metrics, config, sampl
             sample_weight,
             config,
             cache,
-            best_result)
+            best_result,
+            stats)
 
         return result
 
     already_done = {}
 
+    gridsearch_params = expand(gridsearch_params, withextra=True)
     log('Grid-search: %r', gridsearch_params)
+    initial_params_init = [x.packed_init() for x in tunable_params]
+    initial_params_db = Simple1NN()
 
-    best_result['* '] = (float('inf'), None)
+    best_result[MARKER_BRANCHBEST] = (float('inf'), None)
 
-    for params in expand(gridsearch_params):
+    for _score, params, params_vector in gridsearch_params:
         if tunable_params:
-            best_result['+'] = (float('inf'), None)
+            best_result[MARKER_LOCALBEST] = (float('inf'), None)
 
         params_normalized = vw_normalize_params(base_args + params)
+
         if params_normalized != params:
             log('Normalized params %r %r -> %r', base_args, params, params_normalized, importance=-1)
+
         params_as_str = ' '.join(params_normalized)
+
         if params_as_str in already_done:
             log('Skipping %r (same as %r)', ' '.join(params), ' '.join(already_done[params_as_str]), importance=-1)
             continue
+
         already_done[params_as_str] = params
 
         extra_args = params_as_str
-        run([None] * len(tunable_params))
-        scipy.optimize.minimize(run, [x.packed_init() for x in tunable_params], method='Nelder-Mead', options={'xtol': 0.001, 'ftol': 0.001})
 
-    return best_result['* ']
+        if tunable_params:
+            import scipy.optimize
+
+            results = initial_params_db.find_nearest(params_vector)
+            if results:
+                t_params = np.mean(results, axis=0)
+            else:
+                t_params = initial_params_init
+
+            try:
+                optresult = scipy.optimize.minimize(run, t_params, method='Nelder-Mead', options={'xtol': 0.001, 'ftol': 0.001})
+            except InterruptOptimization, ex:
+                log(str(ex), importance=1)
+            log('', importance=1)
+            initial_params_db.add_observation(np.array(params_vector), optresult.x)
+        else:
+            run([])
+
+    return best_result[MARKER_BRANCHBEST]
+
+
+class Simple1NN(object):
+
+    def __init__(self):
+        self.observations = []
+
+    def add_observation(self, x, y):
+        self.observations.append((x, y))
+
+    def find_nearest(self, query_x):
+        nearest_items = []
+        nearest_distance = float('inf')
+        for x, y in self.observations:
+            dist = np.sum(np.abs(x - query_x))
+            # print 'query=%s x=%s y=%s dist=%s' % (query_x, x, y, dist)
+            if dist < nearest_distance:
+                nearest_distance = dist
+                nearest_items = [y]
+            elif dist == nearest_distance:
+                nearest_items.append(y)
+        return nearest_items
 
 
 def vw_normalize_params(params):
@@ -1288,14 +1366,17 @@ def vw_normalize_params(params):
     return params.split()
 
 
-def expand(gridsearch_params, only=None):
-    for item in _expand(gridsearch_params, only=only):
-        yield [x for x in item if x]
+def expand(gridsearch_params, only=None, withextra=False):
+    result = list(_expand(gridsearch_params, only=only))
+    result.sort()
+    if withextra:
+        return result
+    return [x[1] for x in result]
 
 
-def _expand(gridsearch_params, only=None):
+def _expand(gridsearch_params, only=None, score_mult=1):
     if not gridsearch_params:
-        yield []
+        yield (0, [], [])
         return
 
     first_arg = gridsearch_params[0]
@@ -1308,13 +1389,18 @@ def _expand(gridsearch_params, only=None):
         skip = False
 
     if skip:
-        for inner in _expand(gridsearch_params[1:], only=only):
-            yield [first_arg] + inner
+        for inner_score, inner_cmd, inner_vector in _expand(gridsearch_params[1:], only=only, score_mult=score_mult):
+            yield (inner_score, _filter([first_arg] + inner_cmd), inner_vector)
         return
 
-    for first_arg_variant in first_arg.enumerate_all():
-        for inner in _expand(gridsearch_params[1:], only=only):
-            yield [first_arg_variant] + inner
+    for index, first_arg_variant in enumerate(first_arg.enumerate_all()):
+        for inner_score, inner, inner_vector in _expand(gridsearch_params[1:], only=only, score_mult=score_mult * 1.01):
+            new_inner_vector = [index] + inner_vector
+            yield (index * score_mult + inner_score, _filter([first_arg_variant] + inner), new_inner_vector)
+
+
+def _filter(lst):
+    return [x for x in lst if x]
 
 
 def get_language(doc):
@@ -2365,8 +2451,12 @@ def main_tune(metric, config, filename, format, y_true, sample_weight, args, pre
     best_result = None
     already_done = {}
 
-    preprocessor_variants = list(expand(args, only=Preprocessor.ALL_OPTIONS_DASHDASH))
+    preprocessor_variants = expand(args, only=Preprocessor.ALL_OPTIONS_DASHDASH)
+
     log('Trying preprocessor variants: %s', pprint.pformat(preprocessor_variants), importance=-1)
+
+    best_result = {}
+    best_result[MARKER_BEST] = (float('inf'), None)
 
     for my_args in preprocessor_variants:
         preprocessor = Preprocessor.from_options(preprocessor_base + my_args)
@@ -2412,7 +2502,8 @@ def main_tune(metric, config, filename, format, y_true, sample_weight, args, pre
                 metric,
                 config,
                 sample_weight=sample_weight,
-                workers=workers)
+                workers=workers,
+                best_result=best_result)
         finally:
             unlink(*to_cleanup)
 
