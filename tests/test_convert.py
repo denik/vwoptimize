@@ -44,7 +44,7 @@ $ vwoptimize.py -d simple.vw --tovw /dev/stdout --weight 1:2,0:0.1
 
 [fromvw_tovw__preprocessor]
 $ vwoptimize.py -d simple.vw --tovw /dev/stdout --weight 1:2,0:0.1 --lowercase
-(0)preprocessor = --lowercase
+preprocessor = --lowercase
 0 0.1 | price:.23 sqft:.25 age:.05 2006
 1 4.0 'second_house | price:.18 sqft:.15 age:.35 1976
 0 0.1 0.5 'third_house | price:.53 sqft:.32 age:.87 1924

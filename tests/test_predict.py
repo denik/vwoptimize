@@ -46,7 +46,7 @@ $ echo '| gulf states' | vwoptimize.py -d - -i tmp_ag_news.model -p /dev/stdout 
 3
 
 $ echo '1 | gulf states' | vwoptimize.py -d - -i tmp_ag_news.model --quiet --metric acc
-(0)acc = 0
+acc = 0
 
 $ echo '3 | gulf states' | vwoptimize.py -d - -i tmp_ag_news.model -t --metric acc 2>&1 | egrep 'average|acc'
 average  since         example        example  current  current  current
