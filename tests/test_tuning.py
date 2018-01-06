@@ -48,8 +48,8 @@ tuning failed
 
 [tuning_bad_metrics]
 $ vwoptimize.py -d small_ag_news.csv --oaa 4 --metric vw_average_loss,brier,auc,acc,num_features -b 18/20? --kfold 10 --quiet
-Result vw --oaa 4 --quiet -b 18... vw_average_loss=0.48*   brier=ValueError auc=ValueError  acc=0.52  num_features=4103.2
-Result vw --oaa 4 --quiet -b 20... vw_average_loss=0.5     brier=ValueError auc=ValueError  acc=0.5   num_features=4138.8
+Result vw --oaa 4 --quiet -b 18... vw_average_loss=0.48*   brier=ValueError  auc=ValueError  acc=0.52  num_features=4103.2
+Result vw --oaa 4 --quiet -b 20... vw_average_loss=0.5     brier=ValueError  auc=ValueError  acc=0.5   num_features=4138.8
 Best vw options = --oaa 4 --quiet -b 18
 Best vw_average_loss = 0.48
 brier = ValueError: Cannot calculate on multiclass
@@ -95,14 +95,14 @@ Best vw_average_loss = 2.39627
 
 [tune_preprocessor__strip_punct]
 $ vwoptimize.py -d small_ag_news.csv --strip_punct? --quiet
-Result vw --quiet... vw_average_loss=2.39627
-Best vw_average_loss with 'no preprocessing' = 2.39627*
-Result vw --quiet... vw_average_loss=2.40069
+Result vw --quiet... vw_average_loss=2.396272*
+Best vw_average_loss with 'no preprocessing' = 2.396272*
+Result vw --quiet... vw_average_loss=2.400687*
 Best options with --strip_punct = --quiet
-Best vw_average_loss with '--strip_punct' = 2.40069
+Best vw_average_loss with '--strip_punct' = 2.400687
 Best preprocessor options = <none>
 Best vw options = --quiet
-Best vw_average_loss = 2.39627
+Best vw_average_loss = 2.396272
 
 [tune_preprocessor__both]
 $ vwoptimize.py -d small_ag_news.csv --max_words /2/5? --strip_punct? --quiet
