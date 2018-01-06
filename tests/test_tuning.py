@@ -95,7 +95,7 @@ Best vw_average_loss = 2.39627
 
 [tune_preprocessor__strip_punct]
 $ vwoptimize.py -d small_ag_news.csv --strip_punct? --quiet
-Result vw --quiet... vw_average_loss=2.396272*
+Result vw --quiet... vw_average_loss=2.396272**
 Best vw_average_loss with 'no preprocessing' = 2.396272*
 Result vw --quiet... vw_average_loss=2.400687*
 Best options with --strip_punct = --quiet
@@ -106,7 +106,7 @@ Best vw_average_loss = 2.396272
 
 [tune_preprocessor__both]
 $ vwoptimize.py -d small_ag_news.csv --max_words /2/5? --strip_punct? --quiet
-Result vw --quiet... vw_average_loss=2.396272*
+Result vw --quiet... vw_average_loss=2.396272**
 Best vw_average_loss with 'no preprocessing' = 2.396272*
 Result vw --quiet... vw_average_loss=2.400687*
 Best options with --strip_punct = --quiet

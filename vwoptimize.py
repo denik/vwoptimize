@@ -1200,11 +1200,11 @@ def run_single_iteration(vw_filename,
     results = '  '.join(results)
     results = results.rstrip()
 
-    local_best = best_result[MARKER_LOCALBEST][0]
-    global_best = best_result[MARKER_BEST][0]
+    local_best = (best_result.get(MARKER_LOCALBEST) or best_result.get(MARKER_BRANCHBEST))[0]
+    global_best = (best_result.get(MARKER_BEST) or best_result.get(MARKER_BRANCHBEST))[0]
     branch_improvement = (global_best - local_best) / min(abs(global_best), abs(local_best))
 
-    log('Result %s %s... %s', VW_CMD, args, results, importance=1 + int(bool(is_best)))
+    log('Result %s %s... %s', VW_CMD, args, results, importance=1 + int(len(is_best)))
 
     if cache is not None:
         cache[args] = result
@@ -2448,7 +2448,7 @@ def main_tune(metric, config, filename, format, y_true, sample_weight, args, pre
 
     best_preprocessor_opts = None
     best_vw_options = None
-    best_result = None
+    best_result_so_far = None
     already_done = {}
 
     preprocessor_variants = expand(args, only=Preprocessor.ALL_OPTIONS_DASHDASH)
@@ -2456,7 +2456,8 @@ def main_tune(metric, config, filename, format, y_true, sample_weight, args, pre
     log('Trying preprocessor variants: %s', pprint.pformat(preprocessor_variants), importance=-1)
 
     best_result = {}
-    best_result[MARKER_BEST] = (float('inf'), None)
+    if len(preprocessor_variants) > 1:
+        best_result[MARKER_BEST] = (float('inf'), None)
 
     for my_args in preprocessor_variants:
         preprocessor = Preprocessor.from_options(preprocessor_base + my_args)
@@ -2508,8 +2509,8 @@ def main_tune(metric, config, filename, format, y_true, sample_weight, args, pre
             unlink(*to_cleanup)
 
         is_best = ''
-        if this_best_result is not None and (best_result is None or this_best_result < best_result):
-            best_result = this_best_result
+        if this_best_result is not None and (best_result_so_far is None or best_result_so_far > this_best_result):
+            best_result_so_far = this_best_result
             best_vw_options = this_best_options
             best_preprocessor_opts = preprocessor_opts
             is_best = '*'
@@ -2524,7 +2525,7 @@ def main_tune(metric, config, filename, format, y_true, sample_weight, args, pre
     if len(preprocessor_variants) > 1:
         log_always('Best preprocessor options = %s', best_preprocessor_opts or '<none>')
     log_always('Best vw options = %s', best_vw_options)
-    log_always('Best %s = %s', optimization_metric, _frmt_score(best_result))
+    log_always('Best %s = %s', optimization_metric, _frmt_score(best_result_so_far))
     # print 'Improvement over no l1=%.4f. Improvement over initial guess=%.4f' % (no_l1_result - best_result[0], initial_l1_result - best_result[0])
     preprocessor = Preprocessor.from_options(best_preprocessor_opts)
     return best_vw_options, preprocessor

@@ -30,8 +30,8 @@ acc = 0.666667
 $ vwoptimize.py -d simple_w.csv --columnspec y,weight,text,text -b 1/2/3? --quiet 2>&1 --metric acc
 Result vw --quiet -b 1... acc=0.047619*
 Result vw --quiet -b 2... acc=0.52381*
-Result vw --quiet -b 3... acc=0.52381*
-Best vw options = --quiet -b 3
+Result vw --quiet -b 3... acc=0.52381
+Best vw options = --quiet -b 2
 Best acc = 0.52381
 acc = 0.52381
 
