@@ -778,35 +778,38 @@ def vw_validation(
 
     command.append(testing_command)
 
-    success, outputs = run_subprocesses([command], workers=workers, importance=-1)
+    try:
+        success, outputs = run_subprocesses([command], workers=workers, importance=-1)
 
-    # check outputs first, the might be a valuable error message there
-    outputs = dict((key, [parse_vw_output(out) for out in value]) for (key, value) in outputs.items())
+        # check outputs first, the might be a valuable error message there
+        outputs = dict((key, [parse_vw_output(out) for out in value]) for (key, value) in outputs.items())
 
-    if not success:
-        vw_failed()
+        if not success:
+            vw_failed()
 
-    for name in to_cleanup:
-        if not os.path.exists(name):
-            vw_failed('missing %r' % (name, ))
+        for name in to_cleanup:
+            if not os.path.exists(name):
+                vw_failed('missing %r' % (name, ))
 
-    predictions = []
-    if p_filename:
-        predictions = open(p_filename).readlines()
-    else:
         predictions = []
+        if p_filename:
+            predictions = open(p_filename).readlines()
+        else:
+            predictions = []
 
-    if r_filename:
-        raw_predictions = open(r_filename).readlines()
-    else:
-        raw_predictions = []
+        if r_filename:
+            raw_predictions = open(r_filename).readlines()
+        else:
+            raw_predictions = []
 
-    if readable_model:
-        num_features = get_num_features(readable_model)
-    else:
-        num_features = None
+        if readable_model:
+            num_features = get_num_features(readable_model)
+        else:
+            num_features = None
 
-    return predictions, raw_predictions, num_features, outputs
+        return predictions, raw_predictions, num_features, outputs
+    finally:
+        unlink(*to_cleanup)
 
 
 def get_num_features(filename):
@@ -1333,7 +1336,11 @@ def run_single_iteration(vw_filename,
 
     local_best = (best_result.get(MARKER_LOCALBEST) or best_result.get(MARKER_BRANCHBEST))[0]
     global_best = (best_result.get(MARKER_BEST) or best_result.get(MARKER_BRANCHBEST))[0]
-    branch_improvement = (global_best - local_best) / min(abs(global_best), abs(local_best))
+    div = min(abs(global_best), abs(local_best))
+    if div:
+        branch_improvement = (global_best - local_best) / div
+    else:
+        branch_improvement = global_best - local_best
 
     log('Result %s %s... %s', VW_CMD, args, results, importance=1 + int(len(is_best)))
 
@@ -1447,10 +1454,14 @@ def vw_optimize(vw_filename, vw_validation_filename, y_true, kfold, args, metric
                 optresult = scipy.optimize.minimize(run, t_params, method='Nelder-Mead', options={'xtol': 0.001, 'ftol': 0.001})
             except InterruptOptimization, ex:
                 log(str(ex), importance=1)
-            log('', importance=1)
-            initial_params_db.add_observation(np.array(params_vector), optresult.x)
+            else:
+                log('', importance=1)
+                initial_params_db.add_observation(np.array(params_vector), optresult.x)
         else:
-            run([])
+            try:
+                run([])
+            except InterruptOptimization, ex:
+                log(str(ex), importance=1)
 
     return best_result[MARKER_BRANCHBEST]
 
