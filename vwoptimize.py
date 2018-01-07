@@ -697,6 +697,118 @@ def vw_cross_validation(
         unlink(*to_cleanup)
 
 
+def vw_validation(
+        vw_filename,
+        vw_validation_filename,
+        vw_args,
+        workers=None,
+        with_predictions=False,
+        with_raw_predictions=False,
+        calc_num_features=False,
+        capture_output=False):
+
+    assert os.path.exists(vw_validation_filename), vw_validation_filename
+
+    if hasattr(capture_output, '__contains__') and '' in capture_output:
+        capture_output = True
+
+    vw_args = vw_args.replace('--quiet', '')
+    model_prefix = get_temp_filename('model')
+    model_filename = model_prefix + '.bin'
+    to_cleanup = [model_filename]
+
+    if with_predictions:
+        p_filename = '%s.predictions' % model_prefix
+        to_cleanup.append(p_filename)
+    else:
+        p_filename = None
+
+    if with_raw_predictions:
+        r_filename = '%s.raw' % model_prefix
+        to_cleanup.append(p_filename)
+    else:
+        r_filename = None
+
+    if calc_num_features:
+        readable_model = model_prefix + '.readable'
+        to_cleanup.append(readable_model)
+    else:
+        readable_model = None
+
+    command = get_vw_command(
+        to_cleanup,
+        vw_filename,
+        vw_args=vw_args,
+        final_regressor=model_filename,
+        predictions=None,
+        raw_predictions=None,
+        readable_model=readable_model,
+        name='train')
+
+    for item in command:
+        if capture_output is True or item['name'] in capture_output:
+            item['stderr'] = subprocess.PIPE
+        else:
+            item['args'] += ' --quiet'
+
+    test_args = []
+
+    loss_function = read_argument(vw_args.split(), '--loss_function')
+
+    if loss_function:
+        test_args.append('--loss_function ' + loss_function)
+
+    if '--probabilities' in vw_args:
+        test_args.append('--probabilities')
+
+    testing_command = get_vw_command(
+        to_cleanup,
+        vw_validation_filename,
+        vw_args=' '.join(test_args),
+        initial_regressor=model_filename,
+        predictions=p_filename,
+        raw_predictions=r_filename,
+        only_test=True,
+        name='test')
+
+    if capture_output is True or 'test' in capture_output:
+        testing_command['stderr'] = subprocess.PIPE
+    else:
+        testing_command['args'] += ' --quiet'
+
+    command.append(testing_command)
+
+    success, outputs = run_subprocesses([command], workers=workers, importance=-1)
+
+    # check outputs first, the might be a valuable error message there
+    outputs = dict((key, [parse_vw_output(out) for out in value]) for (key, value) in outputs.items())
+
+    if not success:
+        vw_failed()
+
+    for name in to_cleanup:
+        if not os.path.exists(name):
+            vw_failed('missing %r' % (name, ))
+
+    predictions = []
+    if p_filename:
+        predictions = open(p_filename).readlines()
+    else:
+        predictions = []
+
+    if r_filename:
+        raw_predictions = open(r_filename).readlines()
+    else:
+        raw_predictions = []
+
+    if readable_model:
+        num_features = get_num_features(readable_model)
+    else:
+        num_features = None
+
+    return predictions, raw_predictions, num_features, outputs
+
+
 def get_num_features(filename):
     counting = False
     count = 0
@@ -1107,6 +1219,7 @@ table = None
 
 
 def run_single_iteration(vw_filename,
+                         vw_validation_filename,
                          kfold,
                          args,
                          workers,
@@ -1135,14 +1248,24 @@ def run_single_iteration(vw_filename,
     log('Trying %s %s...', VW_CMD, args)
 
     try:
-        y_pred_text, raw_pred_text, num_features, outputs = vw_cross_validation(
-            vw_filename,
-            kfold,
-            args,
-            workers=workers,
-            with_predictions=bool(calculated_metrics),
-            calc_num_features=show_num_features,
-            capture_output=set([_get_stage(m) for m in vw_metrics]))
+        if vw_validation_filename is not None:
+            y_pred_text, raw_pred_text, num_features, outputs = vw_validation(
+                vw_filename,
+                vw_validation_filename,
+                args,
+                workers=workers,
+                with_predictions=bool(calculated_metrics),
+                calc_num_features=show_num_features,
+                capture_output=set([_get_stage(m) for m in vw_metrics]))
+        else:
+            y_pred_text, raw_pred_text, num_features, outputs = vw_cross_validation(
+                vw_filename,
+                kfold,
+                args,
+                workers=workers,
+                with_predictions=bool(calculated_metrics),
+                calc_num_features=show_num_features,
+                capture_output=set([_get_stage(m) for m in vw_metrics]))
     except KeyboardInterrupt:
         raise
     except BaseException, ex:
@@ -1238,7 +1361,7 @@ MARKER_BRANCHBEST = '* '
 MARKER_BEST = '** '
 
 
-def vw_optimize_over_cv(vw_filename, y_true, kfold, args, metrics, config, sample_weight, workers, best_result):
+def vw_optimize(vw_filename, vw_validation_filename, y_true, kfold, args, metrics, config, sample_weight, workers, best_result):
     gridsearch_params = []
     tunable_params = []
     base_args = []
@@ -1269,6 +1392,7 @@ def vw_optimize_over_cv(vw_filename, y_true, kfold, args, metrics, config, sampl
 
         result = run_single_iteration(
             vw_filename,
+            vw_validation_filename,
             kfold,
             args,
             workers,
@@ -2441,7 +2565,7 @@ def classification_report(y_true, y_pred, labels=None, sample_weight=None, digit
     return results
 
 
-def main_tune(metric, config, filename, format, y_true, sample_weight, args, preprocessor_base, kfold, ignoreheader, workers):
+def main_tune(metric, config, filename, validation, format, y_true, sample_weight, args, preprocessor_base, kfold, ignoreheader, workers):
     if preprocessor_base is None:
         preprocessor_base = []
     else:
@@ -2484,13 +2608,13 @@ def main_tune(metric, config, filename, format, y_true, sample_weight, args, pre
 
             if format == 'vw' and not weight_train and not preprocessor:
                 vw_filename = filename
+                vw_validation_filename = validation
             else:
                 vw_filename = get_temp_filename('vw_filename')
                 to_cleanup.append(vw_filename)
-                convert_any_to_vw(
-                    source=filename,
+
+                convert_args = dict(
                     format=format,
-                    output_filename=vw_filename,
                     columnspec=config.get('columnspec'),
                     named_labels=config.get('named_labels'),
                     remap_label=config.get('remap_label'),
@@ -2499,10 +2623,20 @@ def main_tune(metric, config, filename, format, y_true, sample_weight, args, pre
                     ignoreheader=ignoreheader,
                     workers=workers)
 
+                convert_any_to_vw(source=filename, output_filename=vw_filename, **convert_args)
+
+                if validation:
+                    vw_validation_filename = get_temp_filename('vw_validation')
+                    to_cleanup.append(vw_validation_filename)
+                    convert_any_to_vw(source=validation, output_filename=vw_validation_filename, **convert_args)
+                else:
+                    vw_validation_filename = None
+
             vw_args = [x for x in my_args if getattr(x, 'opt', None) or str(x).split()[0] not in Preprocessor.ALL_OPTIONS_DASHDASH]
 
-            this_best_result, this_best_options = vw_optimize_over_cv(
+            this_best_result, this_best_options = vw_optimize(
                 vw_filename,
+                vw_validation_filename,
                 y_true,
                 kfold,
                 vw_args,
@@ -2957,6 +3091,7 @@ def main(to_cleanup):
     parser.add_option('--workers', type=int)
     parser.add_option('--metric', action='append')
     parser.add_option('--metricformat')
+    parser.add_option('--validation')
 
     # class weight option
     parser.add_option('--weight', action='append', help='Class weights to use in CLASS:WEIGHT format', default=[])
@@ -3211,10 +3346,11 @@ def main(to_cleanup):
     examples = read_argument(args, '--examples', type=int)
 
     if need_y_true_and_y_pred:
-        assert filename is not None
-        y_true, sample_weight = read_y_true(filename, format, config.get('columnspec'), options.ignoreheader, config.get('named_labels'), config.get('remap_label'), examples=examples)
+        y_true_filename = options.validation or filename
+        assert y_true_filename is not None
+        y_true, sample_weight = read_y_true(y_true_filename, format, config.get('columnspec'), options.ignoreheader, config.get('named_labels'), config.get('remap_label'), examples=examples)
         if not len(y_true):
-            sys.exit('%s is empty' % filename)
+            sys.exit('%s is empty' % y_true_filename)
         if not config.get('named_labels') and not is_multiclass:
             min_label = np.min(y_true)
             max_label = np.max(y_true)
@@ -3293,9 +3429,10 @@ def main(to_cleanup):
             metric=options.metric,
             config=config,
             filename=filename,
-            format=format,
+            validation=options.validation,
             y_true=y_true,
             sample_weight=sample_weight,
+            format=format,
             args=args,
             preprocessor_base=preprocessor,
             kfold=options.kfold,
@@ -3413,7 +3550,7 @@ def main(to_cleanup):
 
         predictions_fname = options.predictions
 
-        if need_y_true_and_y_pred:
+        if need_y_true_and_y_pred and not options.validation:
             if not predictions_fname or predictions_fname in STDOUT_NAMES:
                 predictions_fname = get_temp_filename('pred')
                 to_cleanup.append(predictions_fname)
@@ -3473,9 +3610,7 @@ def main(to_cleanup):
         y_pred = None
         y_pred_text = None
 
-        if need_y_true_and_y_pred:
-            assert predictions_fname is not None
-            assert y_true is not None
+        if predictions_fname is not None and y_true is not None:
             y_pred, y_pred_text = _load_predictions(predictions_fname, len(y_true), with_text=True, named_labels=config.get('named_labels'))
 
         # we don't support extracted metrics there because we don't capture stderr
