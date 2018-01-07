@@ -1218,6 +1218,15 @@ def best_result_update(best_result, result, args):
     return best_marker
 
 
+def run_cached(cache, cache_key, func, *args, **kwargs):
+    cache_key = str(cache_key)
+    if cache is not None and cache_key in cache:
+        return cache[cache_key]
+    result = func(*args, **kwargs)
+    cache[cache_key] = result
+    return result
+
+
 table = None
 
 
@@ -1230,9 +1239,9 @@ def run_single_iteration(vw_filename,
                          y_true,
                          sample_weight,
                          config,
-                         cache,
                          best_result,
-                         stats):
+                         stats,
+                         with_predictions):
     global table
 
     if isinstance(args, list):
@@ -1241,9 +1250,6 @@ def run_single_iteration(vw_filename,
         assert isinstance(args, str), args
 
     args = re.sub('\s+', ' ', args).strip()
-
-    if cache is not None and args in cache:
-        return cache[args]
 
     calculated_metrics, vw_metrics, show_num_features = split_metrics(metrics)
     metric = metrics[0]
@@ -1257,7 +1263,7 @@ def run_single_iteration(vw_filename,
                 vw_validation_filename,
                 args,
                 workers=workers,
-                with_predictions=bool(calculated_metrics),
+                with_predictions=with_predictions or bool(calculated_metrics),
                 calc_num_features=show_num_features,
                 capture_output=set([_get_stage(m) for m in vw_metrics]))
         else:
@@ -1266,7 +1272,7 @@ def run_single_iteration(vw_filename,
                 kfold,
                 args,
                 workers=workers,
-                with_predictions=bool(calculated_metrics),
+                with_predictions=with_predictions or bool(calculated_metrics),
                 calc_num_features=show_num_features,
                 capture_output=set([_get_stage(m) for m in vw_metrics]))
     except KeyboardInterrupt:
@@ -1274,10 +1280,8 @@ def run_single_iteration(vw_filename,
     except BaseException, ex:
         if type(ex) is not SystemExit:
             traceback.print_exc()
-        log('Result %s %s... error: %s', VW_CMD, args, ex, importance=1)
-        if cache is not None:
-            cache[args] = None
-        return None
+        log('Result %s %s... error: %s', VW_CMD, args, ex, importance=2)
+        return (None, None, None)
 
     y_pred = None
 
@@ -1315,10 +1319,9 @@ def run_single_iteration(vw_filename,
     else:
         stats['no_improvement_counter'] = stats.get('no_improvement_counter', 0) + 1
 
-    is_best = is_best or ' '
     values = [_frmt_score(calculate_or_extract_score(m, y_true, y_pred, config, outputs, sample_weight, num_features=num_features)) for m in metrics]
     values[1:] = [x.split()[0].rstrip(':') for x in values[1:]]
-    values[0] += is_best
+    values[0] += is_best or ' '
 
     if table is None or len(table) != len(values):
         table = [len(x) for x in values]
@@ -1342,10 +1345,7 @@ def run_single_iteration(vw_filename,
     else:
         branch_improvement = global_best - local_best
 
-    log('Result %s %s... %s', VW_CMD, args, results, importance=1 + int(len(is_best)))
-
-    if cache is not None:
-        cache[args] = result
+    log('Result %s %s... %s', VW_CMD, args, results, importance=2 + int(len(is_best)))
 
     if stats['no_improvement_counter'] >= 5 and branch_improvement < -0.1:
         raise InterruptOptimization('No improvement for 5 iterations')
@@ -1356,7 +1356,7 @@ def run_single_iteration(vw_filename,
     if stats['no_improvement_counter'] >= 15 and branch_improvement < 0:
         raise InterruptOptimization('No improvement for 15 iterations')
 
-    return result
+    return result, y_pred_text, is_best
 
 
 class InterruptOptimization(Exception):
@@ -1366,9 +1366,11 @@ class InterruptOptimization(Exception):
 MARKER_LOCALBEST = '+'
 MARKER_BRANCHBEST = '* '
 MARKER_BEST = '** '
+intermediate_counter = 0
 
 
-def vw_optimize(vw_filename, vw_validation_filename, y_true, kfold, args, metrics, config, sample_weight, workers, best_result):
+def vw_optimize(vw_filename, vw_validation_filename, y_true, kfold, args, metrics, config, sample_weight, workers, best_result, intermediate_results, intermediate_context):
+    global intermediate_counter
     gridsearch_params = []
     tunable_params = []
     base_args = []
@@ -1387,6 +1389,7 @@ def vw_optimize(vw_filename, vw_validation_filename, y_true, kfold, args, metric
         best_result = {}
     cache = {}
     stats = {}
+    branch_best = None
 
     def run(params):
         log('Parameters: %r', params)
@@ -1397,7 +1400,10 @@ def vw_optimize(vw_filename, vw_validation_filename, y_true, kfold, args, metric
             if extra_arg:
                 args.append(extra_arg)
 
-        result = run_single_iteration(
+        result, y_pred_text, is_best = run_cached(
+            cache,
+            args,
+            run_single_iteration,
             vw_filename,
             vw_validation_filename,
             kfold,
@@ -1407,9 +1413,14 @@ def vw_optimize(vw_filename, vw_validation_filename, y_true, kfold, args, metric
             y_true,
             sample_weight,
             config,
-            cache,
             best_result,
-            stats)
+            stats,
+            with_predictions=branch_best is not None)
+
+        if is_best and branch_best is not None:
+            branch_best['result'] = str(result)
+            branch_best['args'] = args
+            branch_best['y_pred_text'] = ''.join(y_pred_text)
 
         return result
 
@@ -1425,6 +1436,7 @@ def vw_optimize(vw_filename, vw_validation_filename, y_true, kfold, args, metric
     for _score, params, params_vector in gridsearch_params:
         if tunable_params:
             best_result[MARKER_LOCALBEST] = (float('inf'), None)
+        branch_best = intermediate_context.copy() if intermediate_results else None
 
         params_normalized = vw_normalize_params(base_args + params)
 
@@ -1462,6 +1474,16 @@ def vw_optimize(vw_filename, vw_validation_filename, y_true, kfold, args, metric
                 run([])
             except InterruptOptimization, ex:
                 log(str(ex), importance=1)
+
+        if intermediate_results and branch_best and 'result' in branch_best:
+            intermediate_counter += 1
+            path = intermediate_results + '%s.json' % intermediate_counter
+            try:
+                os.makedirs(os.path.dirname(path))
+            except OSError:
+                pass
+            write_file(path, json.dumps(branch_best, indent=4, sort_keys=True) + '\n')
+            log('Results saved to %s', path, importance=2)
 
     return best_result[MARKER_BRANCHBEST]
 
@@ -2576,7 +2598,7 @@ def classification_report(y_true, y_pred, labels=None, sample_weight=None, digit
     return results
 
 
-def main_tune(metric, config, filename, validation, format, y_true, sample_weight, args, preprocessor_base, kfold, ignoreheader, workers):
+def main_tune(metric, config, filename, validation, format, y_true, sample_weight, args, preprocessor_base, kfold, ignoreheader, workers, intermediate_results):
     if preprocessor_base is None:
         preprocessor_base = []
     else:
@@ -2655,7 +2677,9 @@ def main_tune(metric, config, filename, validation, format, y_true, sample_weigh
                 config,
                 sample_weight=sample_weight,
                 workers=workers,
-                best_result=best_result)
+                best_result=best_result,
+                intermediate_results=intermediate_results,
+                intermediate_context={'preprocessor_opts': preprocessor_opts})
         finally:
             unlink(*to_cleanup)
 
@@ -3103,6 +3127,7 @@ def main(to_cleanup):
     parser.add_option('--metric', action='append')
     parser.add_option('--metricformat')
     parser.add_option('--validation')
+    parser.add_option('--intermediate_results')
 
     # class weight option
     parser.add_option('--weight', action='append', help='Class weights to use in CLASS:WEIGHT format', default=[])
@@ -3448,7 +3473,8 @@ def main(to_cleanup):
             preprocessor_base=preprocessor,
             kfold=options.kfold,
             ignoreheader=options.ignoreheader,
-            workers=options.workers)
+            workers=options.workers,
+            intermediate_results=options.intermediate_results)
         if vw_args is None:
             sys.exit('tuning failed')
         config['preprocessor'] = str(preprocessor) if preprocessor else None
