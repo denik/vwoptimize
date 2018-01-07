@@ -530,6 +530,7 @@ def vw_cross_validation(
         vw_filename,
         kfold,
         vw_args,
+        vw_test_args,
         workers=None,
         with_predictions=False,
         with_raw_predictions=False,
@@ -612,20 +613,10 @@ def vw_cross_validation(
             item['args'] += ' --quiet'
 
     if testset:
-        test_args = []
-
-        loss_function = read_argument(vw_args.split(), '--loss_function')
-
-        if loss_function:
-            test_args.append('--loss_function ' + loss_function)
-
-        if '--probabilities' in vw_args:
-            test_args.append('--probabilities')
-
         testing_command = get_vw_command(
             cleanup_tmpl,
             testset,
-            vw_args=' '.join(test_args),
+            vw_args=vw_test_args,
             initial_regressor=model_filename,
             predictions=p_filename,
             raw_predictions=r_filename,
@@ -697,10 +688,29 @@ def vw_cross_validation(
         unlink(*to_cleanup)
 
 
+def extract_test_args(vw_args):
+    if isinstance(vw_args, basestring):
+        vw_args = vw_args.split()
+
+    test_args = []
+
+    loss_function = read_argument(vw_args, '--loss_function')
+
+    if loss_function:
+        test_args.append('--loss_function ' + loss_function)
+
+    if '--probabilities' in vw_args:
+        test_args.append('--probabilities')
+
+    return ' '.join(test_args)
+
+
 def vw_validation(
+        to_cleanup,
         vw_filename,
         vw_validation_filename,
         vw_args,
+        vw_test_args,
         workers=None,
         with_predictions=False,
         with_raw_predictions=False,
@@ -715,7 +725,7 @@ def vw_validation(
     vw_args = vw_args.replace('--quiet', '')
     model_prefix = get_temp_filename('model')
     model_filename = model_prefix + '.bin'
-    to_cleanup = [model_filename]
+    to_cleanup.append(model_filename)
 
     if with_predictions:
         p_filename = '%s.predictions' % model_prefix
@@ -725,7 +735,7 @@ def vw_validation(
 
     if with_raw_predictions:
         r_filename = '%s.raw' % model_prefix
-        to_cleanup.append(p_filename)
+        to_cleanup.append(r_filename)
     else:
         r_filename = None
 
@@ -751,20 +761,10 @@ def vw_validation(
         else:
             item['args'] += ' --quiet'
 
-    test_args = []
-
-    loss_function = read_argument(vw_args.split(), '--loss_function')
-
-    if loss_function:
-        test_args.append('--loss_function ' + loss_function)
-
-    if '--probabilities' in vw_args:
-        test_args.append('--probabilities')
-
     testing_command = get_vw_command(
         to_cleanup,
         vw_validation_filename,
-        vw_args=' '.join(test_args),
+        vw_args=vw_test_args,
         initial_regressor=model_filename,
         predictions=p_filename,
         raw_predictions=r_filename,
@@ -778,38 +778,34 @@ def vw_validation(
 
     command.append(testing_command)
 
-    try:
-        success, outputs = run_subprocesses([command], workers=workers, importance=-1)
+    success, outputs = run_subprocesses([command], workers=workers, importance=-1)
 
-        # check outputs first, the might be a valuable error message there
-        outputs = dict((key, [parse_vw_output(out) for out in value]) for (key, value) in outputs.items())
+    # check outputs first, the might be a valuable error message there
+    outputs = dict((key, [parse_vw_output(out) for out in value]) for (key, value) in outputs.items())
 
-        if not success:
-            vw_failed()
+    if not success:
+        vw_failed()
 
-        for name in to_cleanup:
-            if not os.path.exists(name):
-                vw_failed('missing %r' % (name, ))
+    for name in to_cleanup:
+        if not os.path.exists(name):
+            vw_failed('missing %r' % (name, ))
 
+    if p_filename:
+        predictions = open(p_filename).readlines()
+    else:
         predictions = []
-        if p_filename:
-            predictions = open(p_filename).readlines()
-        else:
-            predictions = []
 
-        if r_filename:
-            raw_predictions = open(r_filename).readlines()
-        else:
-            raw_predictions = []
+    if r_filename:
+        raw_predictions = open(r_filename).readlines()
+    else:
+        raw_predictions = []
 
-        if readable_model:
-            num_features = get_num_features(readable_model)
-        else:
-            num_features = None
+    if readable_model:
+        num_features = get_num_features(readable_model)
+    else:
+        num_features = None
 
-        return predictions, raw_predictions, num_features, outputs
-    finally:
-        unlink(*to_cleanup)
+    return predictions, raw_predictions, num_features, outputs, model_filename
 
 
 def get_num_features(filename):
@@ -1232,6 +1228,7 @@ table = None
 
 def run_single_iteration(vw_filename,
                          vw_validation_filename,
+                         vw_test_filename,
                          kfold,
                          args,
                          workers,
@@ -1254,23 +1251,31 @@ def run_single_iteration(vw_filename,
     calculated_metrics, vw_metrics, show_num_features = split_metrics(metrics)
     metric = metrics[0]
 
-    log('Trying %s %s...', VW_CMD, args)
+    log('Trying %s %s...', VW_CMD, args, importance=-1)
+    cleanup = []
+    test_args = extract_test_args(args)
+    model_filename = None
 
     try:
         if vw_validation_filename is not None:
-            y_pred_text, raw_pred_text, num_features, outputs = vw_validation(
+            y_pred_text, raw_pred_text, num_features, outputs, model_filename = vw_validation(
+                cleanup,
                 vw_filename,
                 vw_validation_filename,
-                args,
+                vw_args=args,
+                vw_test_args=test_args,
                 workers=workers,
                 with_predictions=with_predictions or bool(calculated_metrics),
                 calc_num_features=show_num_features,
                 capture_output=set([_get_stage(m) for m in vw_metrics]))
         else:
+            if vw_test_filename is not None:
+                sys.exit('--test not implemented for kfold')
             y_pred_text, raw_pred_text, num_features, outputs = vw_cross_validation(
                 vw_filename,
                 kfold,
-                args,
+                vw_args=args,
+                vw_test_args=test_args,
                 workers=workers,
                 with_predictions=with_predictions or bool(calculated_metrics),
                 calc_num_features=show_num_features,
@@ -1281,82 +1286,99 @@ def run_single_iteration(vw_filename,
         if type(ex) is not SystemExit:
             traceback.print_exc()
         log('Result %s %s... error: %s', VW_CMD, args, ex, importance=2)
-        return (None, None, None)
-
-    y_pred = None
-
-    if y_true is not None:
-        if calculated_metrics and len(y_true) != len(y_pred_text):
-            sys.exit('Internal error: expected %r predictions, got %r' % (len(y_true), len(y_pred_text)))
-
-        if raw_pred_text and len(y_true) != len(raw_pred_text):
-            sys.exit('Internal error: expected %r raw predictions, got %r' % (len(y_true), len(raw_pred_text)))
-
-        y_pred = _load_predictions(y_pred_text, size=len(y_true), named_labels=config.get('named_labels'))
-
-    result = calculate_or_extract_score(metric, y_true, y_pred, config, outputs, sample_weight)
-
-    if isinstance(result, basestring):
-        sys.exit('Cannot calculate %r: %s' % (metric, result))
-
-    if isinstance(result, list):
-        try:
-            result, suffix = mean_h(result)
-        except Exception:
-            log_always("Failed to calculate mean from %r", result)
-            raise
-
-    if not isinstance(result, (int, long, float)):
-        sys.exit('Bad metric for tuning: %s (value=%r)' % (metric, result))
-
-    if not is_loss(metric):
-        result = -result
-
-    is_best = best_result_update(best_result, result, args)
-
-    if is_best:
-        stats['no_improvement_counter'] = 0
+        return (None, None, None, None)
     else:
-        stats['no_improvement_counter'] = stats.get('no_improvement_counter', 0) + 1
+        y_pred = None
 
-    values = [_frmt_score(calculate_or_extract_score(m, y_true, y_pred, config, outputs, sample_weight, num_features=num_features)) for m in metrics]
-    values[1:] = [x.split()[0].rstrip(':') for x in values[1:]]
-    values[0] += is_best or ' '
+        if y_true is not None:
+            if calculated_metrics and len(y_true) != len(y_pred_text):
+                sys.exit('Internal error: expected %r predictions, got %r' % (len(y_true), len(y_pred_text)))
 
-    if table is None or len(table) != len(values):
-        table = [len(x) for x in values]
-    else:
-        table = [max(len(x), t) for (x, t) in zip(values, table)]
+            if raw_pred_text and len(y_true) != len(raw_pred_text):
+                sys.exit('Internal error: expected %r raw predictions, got %r' % (len(y_true), len(raw_pred_text)))
 
-    new_values = []
-    for value, size in zip(values, table):
-        value += ' ' * (size - len(value))
-        new_values.append(value)
+            y_pred = _load_predictions(y_pred_text, size=len(y_true), named_labels=config.get('named_labels'))
 
-    results = ['%s=%s' % (x, y) for (x, y) in zip(metrics, new_values)]
-    results = '  '.join(results)
-    results = results.rstrip()
+        result = calculate_or_extract_score(metric, y_true, y_pred, config, outputs, sample_weight)
 
-    local_best = (best_result.get(MARKER_LOCALBEST) or best_result.get(MARKER_BRANCHBEST))[0]
-    global_best = (best_result.get(MARKER_BEST) or best_result.get(MARKER_BRANCHBEST))[0]
-    div = min(abs(global_best), abs(local_best))
-    if div:
-        branch_improvement = (global_best - local_best) / div
-    else:
-        branch_improvement = global_best - local_best
+        if isinstance(result, basestring):
+            sys.exit('Cannot calculate %r: %s' % (metric, result))
 
-    log('Result %s %s... %s', VW_CMD, args, results, importance=2 + int(len(is_best)))
+        if isinstance(result, list):
+            try:
+                result, suffix = mean_h(result)
+            except Exception:
+                log_always("Failed to calculate mean from %r", result)
+                raise
 
-    if stats['no_improvement_counter'] >= 5 and branch_improvement < -0.1:
-        raise InterruptOptimization('No improvement for 5 iterations')
+        if not isinstance(result, (int, long, float)):
+            sys.exit('Bad metric for tuning: %s (value=%r)' % (metric, result))
 
-    if stats['no_improvement_counter'] >= 10 and branch_improvement < -0.05:
-        raise InterruptOptimization('No improvement for 10 iterations')
+        if not is_loss(metric):
+            result = -result
 
-    if stats['no_improvement_counter'] >= 15 and branch_improvement < 0:
-        raise InterruptOptimization('No improvement for 15 iterations')
+        is_best = best_result_update(best_result, result, args)
 
-    return result, y_pred_text, is_best
+        if is_best:
+            stats['no_improvement_counter'] = 0
+        else:
+            stats['no_improvement_counter'] = stats.get('no_improvement_counter', 0) + 1
+
+        values = [_frmt_score(calculate_or_extract_score(m, y_true, y_pred, config, outputs, sample_weight, num_features=num_features)) for m in metrics]
+        values[1:] = [x.split()[0].rstrip(':') for x in values[1:]]
+        values[0] += is_best or ' '
+
+        if table is None or len(table) != len(values):
+            table = [len(x) for x in values]
+        else:
+            table = [max(len(x), t) for (x, t) in zip(values, table)]
+
+        new_values = []
+        for value, size in zip(values, table):
+            value += ' ' * (size - len(value))
+            new_values.append(value)
+
+        results = ['%s=%s' % (x, y) for (x, y) in zip(metrics, new_values)]
+        results = '  '.join(results)
+        results = results.rstrip()
+
+        local_best = (best_result.get(MARKER_LOCALBEST) or best_result.get(MARKER_BRANCHBEST))[0]
+        global_best = (best_result.get(MARKER_BEST) or best_result.get(MARKER_BRANCHBEST))[0]
+        div = min(abs(global_best), abs(local_best))
+        if div:
+            branch_improvement = (global_best - local_best) / div
+        else:
+            branch_improvement = global_best - local_best
+
+        log('Result %s %s... %s', VW_CMD, args, results, importance=2 + int(len(is_best)))
+
+        if vw_test_filename is not None and with_predictions and is_best and model_filename is not None:
+            testing_command = get_vw_command(
+                cleanup,
+                vw_test_filename,
+                vw_args=test_args + ' --quiet',
+                initial_regressor=model_filename,
+                predictions='/dev/stdout',
+                only_test=True,
+                name='final_test')
+
+            testing_command['stdout'] = subprocess.PIPE
+            y_pred_text_test = system(testing_command, importance=0)
+        else:
+            y_pred_text_test = None
+
+        if stats['no_improvement_counter'] >= 5 and branch_improvement < -0.1:
+            raise InterruptOptimization('No improvement for 5 iterations')
+
+        if stats['no_improvement_counter'] >= 10 and branch_improvement < -0.05:
+            raise InterruptOptimization('No improvement for 10 iterations')
+
+        if stats['no_improvement_counter'] >= 15 and branch_improvement < 0:
+            raise InterruptOptimization('No improvement for 15 iterations')
+
+        return result, y_pred_text, is_best, y_pred_text_test
+    finally:
+        unlink(*cleanup)
 
 
 class InterruptOptimization(Exception):
@@ -1369,7 +1391,7 @@ MARKER_BEST = '** '
 intermediate_counter = 0
 
 
-def vw_optimize(vw_filename, vw_validation_filename, y_true, kfold, args, metrics, config, sample_weight, workers, best_result, intermediate_results, intermediate_context):
+def vw_optimize(vw_filename, vw_validation_filename, vw_test_filename, y_true, kfold, args, metrics, config, sample_weight, workers, best_result, intermediate_results, intermediate_context):
     global intermediate_counter
     gridsearch_params = []
     tunable_params = []
@@ -1392,7 +1414,7 @@ def vw_optimize(vw_filename, vw_validation_filename, y_true, kfold, args, metric
     branch_best = None
 
     def run(params):
-        log('Parameters: %r', params)
+        log('Parameters: %r', params, importance=-1)
         args = [extra_args]
 
         for param_config, param in zip(tunable_params, params):
@@ -1400,12 +1422,13 @@ def vw_optimize(vw_filename, vw_validation_filename, y_true, kfold, args, metric
             if extra_arg:
                 args.append(extra_arg)
 
-        result, y_pred_text, is_best = run_cached(
+        result, y_pred_text, is_best, y_pred_text_test = run_cached(
             cache,
             args,
             run_single_iteration,
             vw_filename,
             vw_validation_filename,
+            vw_test_filename,
             kfold,
             args,
             workers,
@@ -1421,6 +1444,8 @@ def vw_optimize(vw_filename, vw_validation_filename, y_true, kfold, args, metric
             branch_best['result'] = str(result)
             branch_best['args'] = args
             branch_best['y_pred_text'] = ''.join(y_pred_text)
+            if y_pred_text_test:
+                branch_best['y_pred_text_test'] = ''.join(y_pred_text_test)
 
         return result
 
@@ -1452,6 +1477,7 @@ def vw_optimize(vw_filename, vw_validation_filename, y_true, kfold, args, metric
         already_done[params_as_str] = params
 
         extra_args = params_as_str
+        need_separator = False
 
         if tunable_params:
             import scipy.optimize
@@ -1467,7 +1493,7 @@ def vw_optimize(vw_filename, vw_validation_filename, y_true, kfold, args, metric
             except InterruptOptimization, ex:
                 log(str(ex), importance=1)
             else:
-                log('', importance=1)
+                need_separator = True
                 initial_params_db.add_observation(np.array(params_vector), optresult.x)
         else:
             try:
@@ -1484,6 +1510,9 @@ def vw_optimize(vw_filename, vw_validation_filename, y_true, kfold, args, metric
                 pass
             write_file(path, json.dumps(branch_best, indent=4, sort_keys=True) + '\n')
             log('Results saved to %s', path, importance=2)
+
+        if need_separator:
+            log('', importance=1)
 
     return best_result[MARKER_BRANCHBEST]
 
@@ -2598,7 +2627,7 @@ def classification_report(y_true, y_pred, labels=None, sample_weight=None, digit
     return results
 
 
-def main_tune(metric, config, filename, validation, format, y_true, sample_weight, args, preprocessor_base, kfold, ignoreheader, workers, intermediate_results):
+def main_tune(metric, config, filename, validation, test, format, y_true, sample_weight, args, preprocessor_base, kfold, ignoreheader, workers, intermediate_results):
     if preprocessor_base is None:
         preprocessor_base = []
     else:
@@ -2642,6 +2671,7 @@ def main_tune(metric, config, filename, validation, format, y_true, sample_weigh
             if format == 'vw' and not weight_train and not preprocessor:
                 vw_filename = filename
                 vw_validation_filename = validation
+                vw_test_filename = test
             else:
                 vw_filename = get_temp_filename('vw_filename')
                 to_cleanup.append(vw_filename)
@@ -2665,11 +2695,19 @@ def main_tune(metric, config, filename, validation, format, y_true, sample_weigh
                 else:
                     vw_validation_filename = None
 
+                if test:
+                    vw_test_filename = get_temp_filename('vw_test')
+                    to_cleanup.append(vw_test_filename)
+                    convert_any_to_vw(source=test, output_filename=vw_validation_filename, **convert_args)
+                else:
+                    vw_test_filename = None
+
             vw_args = [x for x in my_args if getattr(x, 'opt', None) or str(x).split()[0] not in Preprocessor.ALL_OPTIONS_DASHDASH]
 
             this_best_result, this_best_options = vw_optimize(
                 vw_filename,
                 vw_validation_filename,
+                vw_test_filename,
                 y_true,
                 kfold,
                 vw_args,
@@ -3127,6 +3165,7 @@ def main(to_cleanup):
     parser.add_option('--metric', action='append')
     parser.add_option('--metricformat')
     parser.add_option('--validation')
+    parser.add_option('--test')
     parser.add_option('--intermediate_results')
 
     # class weight option
@@ -3466,6 +3505,7 @@ def main(to_cleanup):
             config=config,
             filename=filename,
             validation=options.validation,
+            test=options.test,
             y_true=y_true,
             sample_weight=sample_weight,
             format=format,
@@ -3520,6 +3560,7 @@ def main(to_cleanup):
             vw_filename,
             options.kfold,
             vw_args,
+            vw_test_args=extract_test_args(vw_args),
             workers=options.workers,
             with_predictions=bool(calculated_metrics) or options.predictions or options.toperrors,
             with_raw_predictions=bool(options.raw_predictions),
