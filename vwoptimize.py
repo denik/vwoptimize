@@ -233,10 +233,10 @@ class PassThroughOptionParser(optparse.OptionParser):
         raise optparse.BadOptionError(opt)
 
 
-def system(cmd, importance=1):
+def system(cmd, importance=1, repeat_on_error=0):
     if isinstance(cmd, deque):
         for item in cmd:
-            system(item, importance=importance)
+            system(item, importance=importance, repeat_on_error=repeat_on_error)
         return
 
     sys.stdout.flush()
@@ -252,9 +252,11 @@ def system(cmd, importance=1):
     retcode = popen.wait()
 
     if retcode:
-        log('%s [%.1fs] %s', '-' if retcode == 0 else '!', time.time() - start, get_command_name(cmd), importance=importance - 1)
+        log_always('%s [%.1fs] %s', '-' if retcode == 0 else '!', time.time() - start, get_command_name(cmd))
 
     if retcode:
+        if repeat_on_error > 0:
+            return system(cmd, importance=importance, repeat_on_error=repeat_on_error - 1)
         sys.exit(1)
 
     return (out or '') + (err or '')
@@ -761,6 +763,12 @@ def vw_validation(
         else:
             item['args'] += ' --quiet'
 
+    training_out = system(command, importance=-1, repeat_on_error=1)
+
+    outputs = {}
+    if training_out:
+        outputs['train'] = [parse_vw_output(training_out)]
+
     testing_command = get_vw_command(
         to_cleanup,
         vw_validation_filename,
@@ -776,15 +784,9 @@ def vw_validation(
     else:
         testing_command['args'] += ' --quiet'
 
-    command.append(testing_command)
-
-    success, outputs = run_subprocesses([command], workers=workers, importance=-1)
-
-    # check outputs first, the might be a valuable error message there
-    outputs = dict((key, [parse_vw_output(out) for out in value]) for (key, value) in outputs.items())
-
-    if not success:
-        vw_failed()
+    validation_out = system(testing_command, importance=-1, repeat_on_error=1)
+    if validation_out:
+        outputs['test'] = [parse_vw_output(validation_out)]
 
     for name in to_cleanup:
         if not os.path.exists(name):
