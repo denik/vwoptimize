@@ -252,7 +252,7 @@ def system(cmd, importance=1):
     retcode = popen.wait()
 
     if retcode:
-        log('%s [%.1fs] %s', '-' if retcode == 0 else '!', time.time() - start, cmd, importance=importance - 1)
+        log('%s [%.1fs] %s', '-' if retcode == 0 else '!', time.time() - start, get_command_name(cmd), importance=importance - 1)
 
     if retcode:
         sys.exit(1)
@@ -346,11 +346,28 @@ def die_if_parent_dies(signum=9):
         sys.stderr.write(str(ex) + '\n')
 
 
+def get_command_name(params):
+    if not isinstance(params, dict):
+        return str(params)
+    name = params.get('name', None)
+    args = params.get('args')
+
+    if isinstance(args, list):
+        args = ' '.join(args)
+
+    if name:
+        return '[%s] %s' % (name, args)
+    else:
+        return str(args)
+
+
 def Popen(params, **kwargs):
+    command_name = get_command_name(params)
 
     if isinstance(params, dict):
         params = params.copy()
         args = params.pop('args')
+        params.pop('name', None)
         params.update(kwargs)
     else:
         args = params
@@ -362,16 +379,7 @@ def Popen(params, **kwargs):
 
     params.setdefault('preexec_fn', die_if_parent_dies)
 
-    if isinstance(args, list):
-        command = ' '.join(args)
-    else:
-        command = args
-
-    name = params.pop('name', None)
-    if name:
-        log('+ [%s] %s', name, command, importance=importance)
-    else:
-        log('+ %s', command, importance=importance)
+    log('+ %s', command_name, importance=importance)
 
     popen = subprocess.Popen(args, **params)
     return popen
@@ -419,10 +427,10 @@ def run_subprocesses(cmds, workers=None, importance=None):
                 retcode = popen.wait()
 
                 if retcode:
-                    log_always('failed: %s', popen._cmd.get('args', popen._cmd))
+                    log_always('failed: %s', popen._cmd.get('args', get_command_name(popen._cmd)))
                     return None, outputs
                 else:
-                    log('%s %s', '-' if retcode == 0 else '!', popen._cmd, importance=importance)
+                    log('%s %s', '-' if retcode == 0 else '!', get_command_name(popen._cmd), importance=importance)
 
                 if popen._followup:
                     cmds_queue.append(popen._followup)
