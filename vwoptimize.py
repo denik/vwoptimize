@@ -2698,7 +2698,7 @@ def main_tune(metric, config, filename, validation, test, format, y_true, sample
                 if test:
                     vw_test_filename = get_temp_filename('vw_test')
                     to_cleanup.append(vw_test_filename)
-                    convert_any_to_vw(source=test, output_filename=vw_validation_filename, **convert_args)
+                    convert_any_to_vw(source=test, output_filename=vw_test_filename, **convert_args)
                 else:
                     vw_test_filename = None
 
