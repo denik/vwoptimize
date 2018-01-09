@@ -235,9 +235,11 @@ class PassThroughOptionParser(optparse.OptionParser):
 
 def system(cmd, importance=1, repeat_on_error=0):
     if isinstance(cmd, deque):
+        results = []
         for item in cmd:
-            system(item, importance=importance, repeat_on_error=repeat_on_error)
-        return
+            r = system(item, importance=importance, repeat_on_error=repeat_on_error)
+            results.append(r)
+        return '\n'.join(results).strip()
 
     sys.stdout.flush()
     start = time.time()
