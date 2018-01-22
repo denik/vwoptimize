@@ -186,6 +186,18 @@ def get_format_from_filename(filename):
             return ext
 
 
+class simple_reader(object):
+
+    def __init__(self, source):
+        self.source = source
+
+    def __iter__(self):
+        return self
+
+    def next(self):
+        return self.source.next().split("\t")
+
+
 def open_anything(source, format, ignoreheader, force_unbuffered=False):
     source = open_regular_or_compressed(source)
 
@@ -202,6 +214,10 @@ def open_anything(source, format, ignoreheader, force_unbuffered=False):
             reader.next()
     elif format == 'csv':
         reader = csv.reader(source, csv.excel)
+        if ignoreheader:
+            reader.next()
+    elif format == 'tab':
+        reader = simple_reader(source)
         if ignoreheader:
             reader.next()
     else:
