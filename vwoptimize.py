@@ -182,7 +182,7 @@ def get_format_from_filename(filename):
     items = filename.lower().split('.')
 
     for ext in reversed(items):
-        if ext in ['vw', 'csv', 'tsv']:
+        if ext in ['vw', 'csv', 'tsv', 'tab']:
             return ext
 
 
@@ -195,7 +195,9 @@ class simple_reader(object):
         return self
 
     def next(self):
-        return self.source.next().split("\t")
+        row = self.source.next().split("\t")
+        row[-1] = row[-1].rstrip()
+        return row
 
 
 def open_anything(source, format, ignoreheader, force_unbuffered=False):
@@ -3219,7 +3221,7 @@ def main(to_cleanup):
     # using preprocessor standalone:
     parser.add_option('--tovw')
     parser.add_option('--tovw_simple')
-    parser.add_option('--format', help='File format, one of vw|tsv|csv. If not provided, will be guessed from file extension or from file contents')
+    parser.add_option('--format', help='File format, one of vw|tsv|csv|tab. If not provided, will be guessed from file extension or from file contents')
 
     # using as perf
     parser.add_option('--report', action='store_true')
@@ -3364,8 +3366,8 @@ def main(to_cleanup):
     if not format and filename:
         format = get_format_from_filename(filename)
 
-    if format and format not in ('vw', 'csv', 'tsv'):
-        sys.exit('--format must one of vw,csv,tsv, not %r' % format)
+    if format and format not in ('vw', 'csv', 'tsv', 'tab'):
+        sys.exit('--format must one of vw,csv,tsv,tab not %r' % format)
 
     format = format or config.get('format')
 
