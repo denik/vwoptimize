@@ -1574,6 +1574,7 @@ def vw_normalize_params(params):
     """
     params = ' '.join(params)
     params = params.replace('--ngram 1', '')
+    params = params.replace('--skips 0', '')
     if '--ngram' not in params:
         params = re.sub('--skips \d+', '', params)
     params = re.sub('\s+', ' ', params)
