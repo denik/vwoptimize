@@ -935,7 +935,7 @@ def _load_predictions(file, size=None, with_text=False, named_labels=None, with_
 class BaseParam(object):
 
     PRINTABLE_KEYS = 'opt init min max values format extra'.split()
-    _cast = float
+    _cast = None
 
     @classmethod
     def cast(cls, value):
@@ -943,6 +943,8 @@ class BaseParam(object):
             return None
         if value == '':
             return None
+        if cls._cast is None:
+            return value
         return cls._cast(value)
 
     def pack(self, value):
@@ -1002,6 +1004,7 @@ class BaseParam(object):
             param = self.min
         elif self.max is not None and param >= self.max:
             param = self.max
+        param = self.cast(param)
         format = self.format or '%s'
         extra_arg = format % param
         return self.opt + ' ' + extra_arg + ' '.join(self.extra or [])
@@ -1012,7 +1015,7 @@ class IntegerParam(BaseParam):
 
 
 class FloatParam(BaseParam):
-    pass
+    _cast = float
 
 
 class LogParam(FloatParam):
