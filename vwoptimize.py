@@ -1415,23 +1415,25 @@ MARKER_BRANCHBEST = '* '
 MARKER_BEST = '** '
 intermediate_counter = 0
 
+
 def initial_simplex(tunable_params):
     N = len(tunable_params)
     sim = np.zeros((N + 1, N), dtype=float)
     sim[0] = np.array([param.init for param in tunable_params])
     for k in range(N):
         y = np.zeros(N)
-        for i,param in zip(range(N),tunable_params):
-            if isinstance(param,FloatParam):
-                y[i] = np.random.uniform(param.min,param.max)
-            elif isinstance(param,LogParam):
-                y[i] = np.random.uniform(np.log(param.min),np.log(param.max))
-            elif isinstance(param,IntegerParam):
-                y[i] = np.random.choice(range(param.min,param.max+1))
+        for i, param in zip(range(N), tunable_params):
+            if isinstance(param, FloatParam):
+                y[i] = np.random.uniform(param.min, param.max)
+            elif isinstance(param, LogParam):
+                y[i] = np.random.uniform(np.log(param.min), np.log(param.max))
+            elif isinstance(param, IntegerParam):
+                y[i] = np.random.choice(range(param.min, param.max + 1))
         sim[k + 1] = y
     return sim
 
-def vw_optimize(vw_filename, vw_validation_filename, vw_test_filename, y_true, kfold, args, metrics, config, sample_weight, workers, best_result, intermediate_results, intermediate_context,nm2=False):
+
+def vw_optimize(vw_filename, vw_validation_filename, vw_test_filename, y_true, kfold, args, metrics, config, sample_weight, workers, best_result, intermediate_results, intermediate_context, nm2=False):
 
     global intermediate_counter
     gridsearch_params = []
@@ -1535,7 +1537,7 @@ def vw_optimize(vw_filename, vw_validation_filename, vw_test_filename, y_true, k
                 t_params = initial_params_init
 
             try:
-                optresult = scipy.optimize.minimize(run, t_params, method='Nelder-Mead', options={'xtol': 0.001, 'ftol': 0.001, 'initial_simplex':i_simplex})
+                optresult = scipy.optimize.minimize(run, t_params, method='Nelder-Mead', options={'xtol': 0.001, 'ftol': 0.001, 'initial_simplex': i_simplex})
             except InterruptOptimization, ex:
                 log(str(ex), importance=1)
             else:
@@ -2674,7 +2676,7 @@ def classification_report(y_true, y_pred, labels=None, sample_weight=None, digit
     return results
 
 
-def main_tune(metric, config, filename, validation, test, format, y_true, sample_weight, args, preprocessor_base, kfold, ignoreheader, workers, intermediate_results,nm2=False):
+def main_tune(metric, config, filename, validation, test, format, y_true, sample_weight, args, preprocessor_base, kfold, ignoreheader, workers, intermediate_results, nm2=False):
     if preprocessor_base is None:
         preprocessor_base = []
     else:
@@ -3208,7 +3210,7 @@ def main(to_cleanup):
         parser = PassThroughOptionParser()
 
     # Nelder-Mead2
-    parser.add_option('--nm2',action='store_true')
+    parser.add_option('--nm2', action='store_true')
 
     # cross-validation and parameter tuning options
     parser.add_option('--kfold', type=int)
