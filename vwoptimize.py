@@ -1415,135 +1415,23 @@ MARKER_BRANCHBEST = '* '
 MARKER_BEST = '** '
 intermediate_counter = 0
 
-def NM2():
-    '''
-        Alternative Nelder-Mead with custom simplex.
-
-        Example usage: python vwoptimize.py -d trn.vw -l 0.1/1.0 --l1 1e-1/1e-9? --ngram 1/2? --nm2
-
-        Notice that in order for this method to work one must specify some initial range (i.e. min/max).
-
-        When a continuous hyperparameter is specified using scientific notation (i.e. 1e-1/1e-9) the search is conducted in logarithmic space (i.e. log(1e-1)/log(1e-9)).
-    '''
-
-    from datetime import datetime
-    from collections import OrderedDict
-    import numpy as np
-    from scipy.optimize import minimize
-    from subprocess import Popen, PIPE
-    import shlex
-    import re
-    import sys
-
-    global BEST_LOSS
-    BEST_LOSS = float('inf')
-    
-    def objective(cmd, params):
-        global BEST_LOSS
-
-        args         = shlex.split(cmd+' '+' '.join(["{0} {1}".format(k,params[k]) for k in params.keys()]))
-        popen        = Popen(args, stderr=PIPE)
-        stderr       = ' '.join(popen.stderr.readlines()).decode('utf-8')
-        loss_capture = re.search(r'average loss\s+=\s+(\d+\.\d+)',stderr)
-
-        if loss_capture:
-            loss = float(loss_capture.group(1))
-            sys.stdout.write('{0}: '.format(datetime.now())+' '.join(args)+' '+loss_capture.group(0))
-            if loss < BEST_LOSS:
-                BEST_LOSS = loss
-                sys.stdout.write('{0}\n'.format(MARKER_BEST))
-            else:
-                sys.stdout.write('\n')
-        else:
-            sys.stdout.write('Could not match average loss:\n'+stderr)
-
-        sys.stdout.flush()
-
-        try:
-            popen.wait()
-        except:
-            popen.terminate()
-
-        if loss_capture:
-            return loss
-        else:
-            return float('inf')
-
-    def simplex(param_space):
-    
-        initial_simplex = []
-        for j in range(len(param_space)+1):
-            vertex = []
-            for t,_,params in param_space:
-    
-                if t in set(['log','num']):
-                    _min,_max = [float(x) for x in params]
-                    if t=='log':
-                        vertex.append(np.random.uniform(np.log(_min),np.log(_max)))
-                    elif t=='num':
-                        vertex.append(np.random.uniform(_min,_max))
-                elif t=='ord':
-                    vertex.append(np.random.choice([float(x) for x in params]))
-                    
-            initial_simplex.append(vertex)
-                
-        return initial_simplex
-
-
-    args            = ' '.join(sys.argv[1:])
-    kargs           = OrderedDict(re.findall(r'(--?\w+) ([\w\.\-\/]+)',args))
-    param_space     = []
-    fixed_params    = ''
-    initial_simplex = []
-
-    # Regular expressions to parse the tunning parameters.
-    log_re          = re.compile(r'(\d+e-\d+)\/(\d+e-\d+)')
-    num_re          = re.compile(r'\d+\.\d+\/\d+\.\d+')
-    ord_re          = re.compile(r'\d+\/(\d+\/?)+')
-    
-    for key in kargs.keys():
-        arg = kargs[key]
-            
-        if key == '--max_evals':
-            MAX_EVALS = int(arg)
-        elif key in set(['-f','--final_regressor']):
-            continue
-        elif log_re.match(arg):
-            param_space.append(('log',key,arg.split("/")))
-        elif num_re.match(arg):
-            param_space.append(('num',key,arg.split("/")))
-        elif ord_re.match(arg):
-            param_space.append(('ord',key,arg.split("/")))
-        else:
-            fixed_params += ' {0} {1}'.format(key,arg)
-
-    # Custom simplex.
-    initial_simplex = simplex(param_space)
-
-    # Some helper functions:
-    f = {             # Apply these before passing VW.
-        'log'  : np.exp
-        ,'num' : lambda x: x
-        ,'ord' : lambda x: max(0,int(np.round(x)))
-    }
-    vw_params = lambda x: fixed_params+' '+' '.join(["{0} {1}".format(k,f[t](x)) for k,t,x in zip([k for t,k,p in param_space],[t for t,k,p in param_space],x)])
-    obj       = lambda x: objective(
-        'vw'+ ' '+fixed_params, {k:f[t](x) for k,t,x in zip([k for t,k,p in param_space],[t for t,k,p in param_space],x)})
-
-    # Run scipy.optimize.minimize!        
-    opt_res = minimize(
-        fun         =obj
-        ,x0         =np.zeros(len(param_space))
-        ,method     ='Nelder-Mead'
-        ,options    ={'xtol': 0.001, 'ftol': 0.001, 'initial_simplex': initial_simplex}
-    )
-
-    return (BEST_LOSS, vw_params(opt_res.x))
+def initial_simplex(tunable_params):
+    N = len(tunable_params)
+    sim = np.zeros((N + 1, N), dtype=float)
+    sim[0] = np.array([param.init for param in tunable_params])
+    for k in range(N):
+        y = np.zeros(N)
+        for i,param in zip(range(N),tunable_params):
+            if isinstance(param,FloatParam):
+                y[i] = np.random.uniform(param.min,param.max)
+            elif isinstance(param,LogParam):
+                y[i] = np.random.uniform(np.log(param.min),np.log(param.max))
+            elif isinstance(param,IntegerParam):
+                y[i] = np.random.choice(range(param.min,param.max+1))
+        sim[k + 1] = y
+    return sim
 
 def vw_optimize(vw_filename, vw_validation_filename, vw_test_filename, y_true, kfold, args, metrics, config, sample_weight, workers, best_result, intermediate_results, intermediate_context,nm2=False):
-    
-    if nm2:
-        return NM2()
 
     global intermediate_counter
     gridsearch_params = []
@@ -1635,6 +1523,11 @@ def vw_optimize(vw_filename, vw_validation_filename, vw_test_filename, y_true, k
         if tunable_params:
             import scipy.optimize
 
+            if nm2:
+                i_simplex = initial_simplex(tunable_params)
+            else:
+                i_simplex = None
+
             results = initial_params_db.find_nearest(params_vector)
             if results:
                 t_params = np.mean(results, axis=0)
@@ -1642,7 +1535,7 @@ def vw_optimize(vw_filename, vw_validation_filename, vw_test_filename, y_true, k
                 t_params = initial_params_init
 
             try:
-                optresult = scipy.optimize.minimize(run, t_params, method='Nelder-Mead', options={'xtol': 0.001, 'ftol': 0.001})
+                optresult = scipy.optimize.minimize(run, t_params, method='Nelder-Mead', options={'xtol': 0.001, 'ftol': 0.001, 'initial_simplex':i_simplex})
             except InterruptOptimization, ex:
                 log(str(ex), importance=1)
             else:
