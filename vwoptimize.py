@@ -2338,6 +2338,42 @@ def convert_any_to_vw(source, format, output_filename, columnspec, named_labels,
         log('\n'.join(open(output_filename).read(200).split('\n')) + '...')
 
 
+def _import(path):
+    _NONE = object()
+    if isinstance(path, list):
+        if not path:
+            raise ImportError('Cannot import from empty list: %r' % (path, ))
+        for item in path[:-1]:
+            try:
+                return _import(item)
+            except ImportError:
+                pass
+        return _import(path[-1])
+    if not isinstance(path, basestring):
+        return path
+    if '.' not in path:
+        raise ImportError("Cannot import %r (required format: [path/][package.]module.class)" % path)
+    if '/' in path:
+        package_path, path = path.rsplit('/', 1)
+        sys.path = [package_path] + sys.path
+    else:
+        package_path = None
+    try:
+        module, item = path.rsplit('.', 1)
+        x = __import__(module)
+        for attr in path.split('.')[1:]:
+            oldx = x
+            x = getattr(x, attr, _NONE)
+            if x is _NONE:
+                raise ImportError('Cannot import %r from %r' % (attr, oldx))
+        return x
+    finally:
+        try:
+            sys.path.remove(package_path)
+        except ValueError:
+            pass
+
+
 metrics_shortcuts = {
     'mse': 'mean_squared_error',
     'rmse': 'root_mean_squared_error',
@@ -2542,15 +2578,21 @@ def calculate_score(metric, y_true, y_pred, config, sample_weight, logged_thresh
     if fullname in ('precision_score', 'recall_score', 'f1_score'):
         extra_args['average'] = 'binary'
 
-    if fullname in globals():
+    if '.' in fullname:
+        if ':' in fullname:
+            metric_type, fullname = fullname.split(':')
+        else:
+            metric_type = 'y_score'
+        func = _import(fullname)
+    elif fullname in globals():
+        metric_type = metrics_param[fullname]
         func = globals()[fullname]
     else:
         import sklearn.metrics
         func = getattr(sklearn.metrics, fullname, None)
         if func is None:
             sys.exit('Cannot find %r in sklearn.metrics' % (fullname, ))
-
-    metric_type = metrics_param.get(fullname)
+        metric_type = metrics_param[fullname]
 
     if metric_type == 'y_prob':
         # brier_score_loss
@@ -2575,7 +2617,7 @@ def calculate_score(metric, y_true, y_pred, config, sample_weight, logged_thresh
             y_pred = y_pred > threshold
         return func(y_true, y_pred, **extra_args)
     else:
-        raise ValueError('Unknown metric: %r' % metric)
+        raise ValueError('Unknown metric_type: %r (must be y_score, y_pred or y_prob)' % metric_type)
 
 
 def _log_classification_report(prefix, *args, **kwargs):
