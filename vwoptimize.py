@@ -19,6 +19,10 @@ from itertools import izip, izip_longest
 from collections import deque
 from pipes import quote
 import numpy as np
+try:
+    import threading
+except Exception:
+    import dummy_threading as threading
 
 
 csv.field_size_limit(10000000)
@@ -38,6 +42,7 @@ AWK_TRAINSET = "awk '(NR - $fold) % KFOLDS != 0' VW |"
 AWK_TESTSET = "awk '(NR - $fold) % KFOLDS == 0' VW |"
 PERL_TRAINSET = "perl -nE 'if ((++$NR - $fold) % KFOLDS != 0) { print $_ }' VW |"
 PERL_TESTSET = "perl -nE 'if ((++$NR - $fold) % KFOLDS == 0) { print $_ }' VW |"
+options = None
 
 if 'darwin' in sys.platform:
     # awk is slow on Mac OS X
@@ -129,19 +134,23 @@ def get_temp_filename(suffix, counter=[0]):
     return fname
 
 
+log_lock = threading.RLock()
+
+
 def log(s, *params, **kwargs):
     importance = kwargs.pop('importance', None) or 0
     assert not kwargs, kwargs
     if importance >= MINIMUM_LOG_IMPORTANCE:
-        try:
-            sys.stdout.flush()
-        except IOError:
-            pass
-        try:
-            s = s % params
-        except Exception:
-            s = '%s %r' % (s, params)
-        sys.stderr.write('%s\n' % (s, ))
+        with log_lock:
+            try:
+                sys.stdout.flush()
+            except IOError:
+                pass
+            try:
+                s = s % params
+            except Exception:
+                s = '%s %r' % (s, params)
+            sys.stderr.write('%s\n' % (s, ))
 
 
 def log_always(*args, **kwargs):
@@ -775,6 +784,7 @@ def vw_validation(
         predictions=None,
         raw_predictions=None,
         readable_model=readable_model,
+        fix_cache_file=True,
         name='train')
 
     for item in command:
@@ -934,7 +944,7 @@ def _load_predictions(file, size=None, with_text=False, named_labels=None, with_
 
 class BaseParam(object):
 
-    PRINTABLE_KEYS = 'opt init min max values format extra'.split()
+    PRINTABLE_KEYS = 'opt init min max values format extra omit'.split()
     _cast = None
 
     @classmethod
@@ -957,7 +967,7 @@ class BaseParam(object):
             return value
         return self._unpack(value)
 
-    def __init__(self, opt, init=None, min=None, max=None, format=None, pack=None, unpack=None, extra=None):
+    def __init__(self, opt, init=None, min=None, max=None, format=None, pack=None, unpack=None, extra=None, omit=None, merge=False):
         self.opt = opt
         self.init = self.cast(init)
         self.min = self.cast(min)
@@ -966,14 +976,8 @@ class BaseParam(object):
         self._pack = pack
         self._unpack = unpack
         self.extra = None
-
-        if self.init is None:
-            if self.min is not None and self.max is not None:
-                self.init = self.avg(self.min, self.max)
-            elif self.min is not None:
-                self.init = self.min
-            elif self.max is not None:
-                self.init = self.max
+        self.omit = omit
+        self.separator = '' if merge else ' '
 
     def avg(self, a, b):
         result = self.cast(self.unpack((self.pack(self.min) + self.pack(self.max)) / 2.0))
@@ -993,6 +997,8 @@ class BaseParam(object):
 
     def packed_init(self):
         init = self.init
+        if init is None:
+            init = self.avg(self.min, self.max)
         init = self.pack(init)
         return init
 
@@ -1007,10 +1013,14 @@ class BaseParam(object):
         param = self.cast(param)
         format = self.format or '%s'
         extra_arg = format % param
-        return self.opt + ' ' + extra_arg + ' '.join(self.extra or [])
+        return self.opt + self.separator + extra_arg + ' '.join(self.extra or [])
 
 
 class IntegerParam(BaseParam):
+    _cast = int
+
+
+class RandIntParam(BaseParam):
     _cast = int
 
 
@@ -1018,10 +1028,11 @@ class FloatParam(BaseParam):
     _cast = float
 
 
-class LogParam(FloatParam):
+class LogParam(BaseParam):
+    _cast = float
 
     def __init__(self, opt, **kwargs):
-        FloatParam.__init__(self, opt, pack=np.log, unpack=np.exp, **kwargs)
+        BaseParam.__init__(self, opt, pack=np.log, unpack=np.exp, **kwargs)
 
 
 class ValuesParam(BaseParam):
@@ -1083,62 +1094,69 @@ def get_format(value):
         return '%%.%sf' % len(x)
 
 
-DEFAULTS = {
-    '--ngram': {
-        'min': 1
-    },
-    '--l1': {
-        'min': 1e-11
-    },
-    '--learning_rate': {
-        'min': 0.000001
-    }
-}
-
-
 def get_tuning_config(config):
     """
+    >>> get_tuning_config('--hash_seed randint(10000)?')
+    RandIntParam(opt='--hash_seed', min=0, max=10000)
+
     >>> get_tuning_config('--lowercase?')
     BinaryParam(opt='--lowercase')
 
-    >>> get_tuning_config('--ngram 2?')
-    IntegerParam(opt='--ngram', init=2, min=1)
+    >>> get_tuning_config('--nn 1..10?')
+    IntegerParam(opt='--nn', min=1, max=10)
 
-    >>> get_tuning_config('--ngram 2..?')
-    IntegerParam(opt='--ngram', init=2, min=2)
+    >>> get_tuning_config('--nn 1..10??')
+    IntegerParam(opt='--nn', min=1, max=10, omit=True)
+
+    >>> get_tuning_config('--nn 0..10?')
+    IntegerParam(opt='--nn', min=0, max=10)
 
     >>> get_tuning_config('--ngram 2..5?')
-    IntegerParam(opt='--ngram', init=3, min=2, max=5)
+    IntegerParam(opt='--ngram', min=2, max=5)
 
     >>> get_tuning_config('-b 10..25?')
-    IntegerParam(opt='-b', init=17, min=10, max=25)
+    IntegerParam(opt='-b', min=10, max=25)
 
     >>> get_tuning_config('--learning_rate 0.5?')
-    FloatParam(opt='--learning_rate', init=0.5, min=1e-06, format='%.1f')
+    FloatParam(opt='--learning_rate', init=0.5, format='%.1f')
 
     >>> get_tuning_config('--learning_rate 0.50?')
-    FloatParam(opt='--learning_rate', init=0.5, min=1e-06, format='%.2f')
+    FloatParam(opt='--learning_rate', init=0.5, format='%.2f')
 
     >>> get_tuning_config('--l1 1e-07?')
-    LogParam(opt='--l1', init=1e-07, min=1e-11, format='%.0e')
+    LogParam(opt='--l1', init=1e-07, format='%.0e')
 
     >>> get_tuning_config('--l1 1.0E-07?')
-    LogParam(opt='--l1', init=1e-07, min=1e-11, format='%.1e')
+    LogParam(opt='--l1', init=1e-07, format='%.1e')
 
     >>> get_tuning_config('--l1 ..1.2e-07..?')
     LogParam(opt='--l1', init=1.2e-07, format='%.1e')
 
     >>> get_tuning_config('--l1 1e-10..1e-05?')
-    LogParam(opt='--l1', init=3e-08, min=1e-10, max=1e-05, format='%.0e')
+    LogParam(opt='--l1', min=1e-10, max=1e-05, format='%.0e')
 
     >>> get_tuning_config('--loss_function squared/hinge/percentile?')
     ValuesParam(opt='--loss_function', values=['squared', 'hinge', 'percentile'])
 
     >>> get_tuning_config('--loss_function /hinge/percentile?')
     ValuesParam(opt='--loss_function', values=['', 'hinge', 'percentile'])
+
+    >>> get_tuning_config('--classweight 1:0.1..1.5?')
+    FloatParam(opt='--classweight 1:', min=0.1, max=1.5, format='%.1f')
+
+    >>> get_tuning_config('--classweight 1:0.1..1.5?').get_extra_args(1)
+    '--classweight 1:1.0'
     """
     if isinstance(config, basestring):
         config = config.split()
+
+    assert config[-1].endswith('?'), config
+
+    if config[-1].endswith('??'):
+        config[-1] = config[-1][:-1]
+        omit = True
+    else:
+        omit = None
 
     if len(config) > 2:
         raise ValueError('Cannot parse: %r' % (config, ))
@@ -1157,6 +1175,7 @@ def get_tuning_config(config):
     if len(config) == 1:
         first = first[:-1]
         if '/' in first:
+            # XXX recursive definition? need a proper parser then '(--ngram 2/3? --skips 0..3?)/--ngram 1?'
             return ValuesParam(opt='', values=[(prefix + x if x else '') for x in first.split('/')])
         else:
             return BinaryParam(prefix + first)
@@ -1164,56 +1183,78 @@ def get_tuning_config(config):
     value = config[-1]
     value = value[:-1]
 
+    if value.count(':') == 1:
+        value_prefix, value = value.split(':')
+        opt = config[0] + ' ' + value_prefix + ':'
+        merge = True
+    else:
+        opt = config[0]
+        merge = False
+
+    params = {
+        'opt': opt,
+        'merge': merge,
+        'omit': omit,
+    }
+
     if '/' in value:
-        return ValuesParam(opt=config[0], values=value.split('/'))
+        return ValuesParam(values=value.split('/'), **params)
 
     is_log = 'e' in value.lower()
+    type = None
 
     if value.count('..') == 2:
         min, init, max = value.split('..')
         format = sorted([get_format(min), get_format(init), get_format(max)])[-1]
         is_float = '.' in min or '.' in init or '.' in max
 
-        params = {
-            'opt': config[0],
+        params.update({
             'min': min,
             'init': init,
             'max': max,
             'format': format
-        }
+        })
 
     elif '..' in value:
         min, max = value.split('..')
         is_float = '.' in min or '.' in max
         format = sorted([get_format(min), get_format(max)])[-1]
 
-        params = {
-            'opt': config[0],
+        params.update({
             'min': min,
             'max': max,
             'format': format
-        }
+        })
+
+    elif value.startswith('randint('):
+        value = value[8:].rstrip(')')
+        min = 0
+        value = int(value)
+        params.update({
+            'min': 0,
+            'max': value,
+        })
+
+        type = RandIntParam
+
+        return RandIntParam(**params)
 
     else:
         is_float = '.' in value
         format = get_format(value)
 
-        params = {
-            'opt': config[0],
+        params.update({
             'init': value,
             'format': format
-        }
+        })
 
-    for key, value in DEFAULTS.get(config[0], {}).items():
-        if key not in params:
-            params[key] = value
-
-    if is_log:
-        type = LogParam
-    elif is_float:
-        type = FloatParam
-    else:
-        type = IntegerParam
+    if type is None:
+        if is_log:
+            type = LogParam
+        elif is_float:
+            type = FloatParam
+        else:
+            type = IntegerParam
 
     return type(**params)
 
@@ -1229,12 +1270,13 @@ def best_result_update(best_result, result, args):
     if best_result is None:
         return ''
     best_marker = ''
-    for marker, (best_value, best_args) in best_result.items():
-        if result >= best_value:
-            continue
-        best_result[marker] = (result, args)
-        if (len(marker), marker) > (len(best_marker), best_marker):
-            best_marker = marker
+    with log_lock:
+        for marker, (best_value, best_args) in best_result.items():
+            if result >= best_value:
+                continue
+            best_result[marker] = (result, args)
+            if (len(marker), marker) > (len(best_marker), best_marker):
+                best_marker = marker
 
     return best_marker
 
@@ -1262,15 +1304,14 @@ def run_single_iteration(vw_filename,
                          sample_weight,
                          config,
                          best_result,
-                         stats,
-                         with_predictions):
+                         with_predictions,
+                         validation_holdout):
     global table
 
-    if isinstance(args, list):
-        args = ' '.join(str(x) for x in args)
-    else:
-        assert isinstance(args, str), args
+    list_args = [x for x in args if x.strip()]
 
+    assert isinstance(args, list), args
+    args = ' '.join(str(x) for x in args)
     args = re.sub('\s+', ' ', args).strip()
 
     calculated_metrics, vw_metrics, show_num_features = split_metrics(metrics)
@@ -1310,7 +1351,7 @@ def run_single_iteration(vw_filename,
     except BaseException, ex:
         if type(ex) is not SystemExit:
             traceback.print_exc()
-        log('Result %s %s... error: %s', VW_CMD, args, ex, importance=2)
+        log('Result %s %s : error: %s', VW_CMD, args, ex, importance=2)
         return (None, None, None, None)
     else:
         y_pred = None
@@ -1324,7 +1365,22 @@ def run_single_iteration(vw_filename,
 
             y_pred = _load_predictions(y_pred_text, size=len(y_true), named_labels=config.get('named_labels'))
 
-        result = calculate_or_extract_score(metric, y_true, y_pred, config, outputs, sample_weight)
+        results_h = []
+
+        if validation_holdout and y_pred is not None and y_true is not None:
+            assert 0 < validation_holdout < 1, validation_holdout
+            val_size = int(round(len(y_true) * (1.0 - validation_holdout)))
+            y_true_val = y_true[:val_size]
+            assert len(y_true_val), len(y_true_val)
+            results = [calculate_or_extract_score(m, y_true_val, y_pred[:val_size], config, outputs, sample_weight[:val_size] if sample_weight is not None else None, num_features=num_features) for m in metrics]
+            y_true_h = y_true[val_size:]
+            assert len(y_true_h), len(y_true_h)
+            if len(y_true_h):
+                results_h = [calculate_or_extract_score(m, y_true_h, y_pred[val_size:], config, outputs, sample_weight[val_size:] if sample_weight is not None else None, num_features=num_features) for m in metrics]
+        else:
+            results = [calculate_or_extract_score(m, y_true, y_pred, config, outputs, sample_weight, num_features=num_features) for m in metrics]
+
+        result = results[0]
 
         if isinstance(result, basestring):
             sys.exit('Cannot calculate %r: %s' % (metric, result))
@@ -1344,14 +1400,17 @@ def run_single_iteration(vw_filename,
 
         is_best = best_result_update(best_result, result, args)
 
-        if is_best:
-            stats['no_improvement_counter'] = 0
-        else:
-            stats['no_improvement_counter'] = stats.get('no_improvement_counter', 0) + 1
-
-        values = [_frmt_score(calculate_or_extract_score(m, y_true, y_pred, config, outputs, sample_weight, num_features=num_features)) for m in metrics]
+        values = [_frmt_score(x) for x in results]
         values[1:] = [x.split()[0].rstrip(':') for x in values[1:]]
         values[0] += is_best or ' '
+
+        values = ['%s=%s' % (x, y) for (x, y) in zip(metrics, values)]
+
+        if results_h:
+            values_h = [_frmt_score(x) for x in results_h]
+            values += ['%s(hold)=%s' % (x, y) for (x, y) in zip(metrics, values_h)]
+
+        values = ['Result', VW_CMD] + list_args + [':'] + values
 
         if table is None or len(table) != len(values):
             table = [len(x) for x in values]
@@ -1363,19 +1422,9 @@ def run_single_iteration(vw_filename,
             value += ' ' * (size - len(value))
             new_values.append(value)
 
-        results = ['%s=%s' % (x, y) for (x, y) in zip(metrics, new_values)]
-        results = '  '.join(results)
-        results = results.rstrip()
+        new_values = ' '.join(new_values).rstrip()
 
-        local_best = (best_result.get(MARKER_LOCALBEST) or best_result.get(MARKER_BRANCHBEST))[0]
-        global_best = (best_result.get(MARKER_BEST) or best_result.get(MARKER_BRANCHBEST))[0]
-        div = min(abs(global_best), abs(local_best))
-        if div:
-            branch_improvement = (global_best - local_best) / div
-        else:
-            branch_improvement = global_best - local_best
-
-        log('Result %s %s... %s', VW_CMD, args, results, importance=2 + int(len(is_best)))
+        log(new_values, importance=2 + int(len(is_best)))
 
         if vw_test_filename is not None and with_predictions and is_best and model_filename is not None:
             testing_command = get_vw_command(
@@ -1392,15 +1441,6 @@ def run_single_iteration(vw_filename,
         else:
             y_pred_text_test = None
 
-        if stats['no_improvement_counter'] >= 5 and branch_improvement < -0.1:
-            raise InterruptOptimization('No improvement for 5 iterations')
-
-        if stats['no_improvement_counter'] >= 10 and branch_improvement < -0.05:
-            raise InterruptOptimization('No improvement for 10 iterations')
-
-        if stats['no_improvement_counter'] >= 15 and branch_improvement < 0:
-            raise InterruptOptimization('No improvement for 15 iterations')
-
         return result, y_pred_text, is_best, y_pred_text_test
     finally:
         unlink(*cleanup)
@@ -1416,6 +1456,18 @@ MARKER_BEST = '** '
 intermediate_counter = 0
 
 
+def save_intermediate_results(intermediate_results, data):
+    global intermediate_counter
+    intermediate_counter += 1
+    path = intermediate_results + '%s.json' % intermediate_counter
+    try:
+        os.makedirs(os.path.dirname(path))
+    except OSError:
+        pass
+    write_file(path, json.dumps(data, indent=4, sort_keys=True) + '\n')
+    log('Results saved to %s', path, importance=2)
+
+
 def initial_simplex(tunable_params):
     N = len(tunable_params)
     sim = np.zeros((N + 1, N), dtype=float)
@@ -1427,9 +1479,7 @@ def initial_simplex(tunable_params):
     return sim
 
 
-def vw_optimize(vw_filename, vw_validation_filename, vw_test_filename, y_true, kfold, args, metrics, config, sample_weight, workers, best_result, intermediate_results, intermediate_context, nm2):
-
-    global intermediate_counter
+def vw_optimize(vw_filename, vw_validation_filename, vw_test_filename, y_true, kfold, args, metrics, config, sample_weight, workers, best_result, intermediate_results, intermediate_context, validation_holdout, nm2):
     gridsearch_params = []
     tunable_params = []
     base_args = []
@@ -1447,7 +1497,6 @@ def vw_optimize(vw_filename, vw_validation_filename, vw_test_filename, y_true, k
     if best_result is None:
         best_result = {}
     cache = {}
-    stats = {}
     branch_best = None
 
     def run(params):
@@ -1474,8 +1523,8 @@ def vw_optimize(vw_filename, vw_validation_filename, vw_test_filename, y_true, k
             sample_weight,
             config,
             best_result,
-            stats,
-            with_predictions=branch_best is not None)
+            with_predictions=branch_best is not None,
+            validation_holdout=validation_holdout)
 
         if is_best and branch_best is not None:
             branch_best['result'] = str(result)
@@ -1544,17 +1593,281 @@ def vw_optimize(vw_filename, vw_validation_filename, vw_test_filename, y_true, k
                 log(str(ex), importance=1)
 
         if intermediate_results and branch_best and 'result' in branch_best:
-            intermediate_counter += 1
-            path = intermediate_results + '%s.json' % intermediate_counter
-            try:
-                os.makedirs(os.path.dirname(path))
-            except OSError:
-                pass
-            write_file(path, json.dumps(branch_best, indent=4, sort_keys=True) + '\n')
-            log('Results saved to %s', path, importance=2)
+            save_intermediate_results(intermediate_results, branch_best)
 
         if need_separator:
             log('', importance=1)
+
+    return best_result[MARKER_BRANCHBEST]
+
+
+def setup_hyperopt_Trials(domain, workers):
+    from hyperopt import base
+    from hyperopt.utils import coarse_utcnow
+    from hyperopt.fmin import FMinIter
+    import threading
+    from Queue import Queue
+    import traceback
+
+    class MT_Trials(base.Trials):
+        """Multithreading-enabled Trials implementation for hyperopt.
+        """
+
+        async = True
+
+        def __init__(self, domain, poolsize=None):
+            base.Trials.__init__(self)
+            self.domain = domain
+            self.queue = Queue()
+            self.pool = []
+            if poolsize is None:
+                import multiprocessing
+                poolsize = max(1, multiprocessing.cpu_count() - 1)
+                log('setting poolsize = %s', poolsize)
+            self.poolsize = poolsize
+            self.alive = True
+            for _ in xrange(self.poolsize):
+                worker = threading.Thread(target=self._worker_thread, args=tuple())
+                worker.daemon = True
+                worker.start()
+                self.pool.append(worker)
+
+        def shutdown(self):
+            self.alive = False
+            for _ in xrange(len(self.pool)):
+                self.queue.put(None)
+
+        def insert_trial_docs(self, docs):
+            """ trials - something like is returned by self.new_trial_docs()
+            """
+            docs = [self.assert_valid_trial(base.SONify(doc))
+                    for doc in docs]
+            result = base.Trials._insert_trial_docs(self, docs)
+            for doc in docs:
+                self.queue.put(doc)
+            return result
+
+        def _handle_one_trial(self, trial):
+            assert trial['state'] == base.JOB_STATE_NEW
+            trial['state'] = base.JOB_STATE_RUNNING
+            now = coarse_utcnow()
+            trial['book_time'] = now
+            trial['refresh_time'] = now
+            spec = base.spec_from_misc(trial['misc'])
+            ctrl = base.Ctrl(self.trials, current_trial=trial)
+            try:
+                result = self.domain.evaluate(spec, ctrl)
+            except Exception as e:
+                traceback.print_exc()
+                trial['state'] = base.JOB_STATE_ERROR
+                trial['misc']['error'] = (str(type(e)), str(e))
+                trial['refresh_time'] = coarse_utcnow()
+            else:
+                trial['state'] = base.JOB_STATE_DONE
+                trial['result'] = result
+                trial['refresh_time'] = coarse_utcnow()
+
+        def _worker_thread(self):
+            print_exc = traceback.print_exc
+            while self.alive:
+                trial = self.queue.get()
+                if trial is None:
+                    break
+                try:
+                    self._handle_one_trial(trial)
+                except BaseException:
+                    print_exc()
+                    sys.stderr.write('When handling trial: %r\n\n' % (trial, ))
+                    break
+
+    class FMinIter2(FMinIter):
+
+        def __init__(self, algo, domain, trials, rstate, async=None,
+                     max_queue_len=1,
+                     poll_interval_secs=1.0,
+                     max_evals=sys.maxsize,
+                     verbose=0,
+                     ):
+            self.algo = algo
+            self.domain = domain
+            self.trials = trials
+            if async is None:
+                self.async = trials.async
+            else:
+                self.async = async
+            self.poll_interval_secs = poll_interval_secs
+            self.max_queue_len = max_queue_len
+            self.max_evals = max_evals
+            self.rstate = rstate
+
+    if workers == 1:
+        return base.Trials(), FMinIter2
+
+    trials = MT_Trials(domain=domain, poolsize=workers)
+    return trials, FMinIter2
+
+
+def str_int(x):
+    return str(int(x))
+
+
+def vw_optimize_hyperopt(vw_filename, vw_validation_filename, vw_test_filename, y_true, kfold, args, metrics, config, sample_weight, workers, best_result, intermediate_results, intermediate_context, rounds, validation_holdout):
+    assert isinstance(args, list), args
+    from hyperopt import tpe, hp, base
+
+    space = {}
+    format = {}
+
+    unique_id = [0]
+
+    def convert_to_hyperopt(param):
+
+        name = param.opt + ' uid=%s' % unique_id[0]
+        unique_id[0] += 1
+
+        if isinstance(param, LogParam):
+            assert param.min is not None and param.max is not None, 'For hyperopt, min and max needed for %s' % param.opt
+            distrib = hp.loguniform(name, np.log(param.min), np.log(param.max))
+        elif isinstance(param, RandIntParam):
+            assert param.max is not None
+            distrib = hp.randint(name, param.max)
+        elif isinstance(param, FloatParam):
+            assert param.min is not None and param.max is not None, 'For hyperopt, min and max needed for %s' % param.opt
+            distrib = hp.uniform(name, param.min, param.max)
+        elif isinstance(param, ValuesParam):
+            distrib = hp.choice(name, param.values)
+        elif isinstance(param, BinaryParam):
+            distrib = hp.choice(name, ['', True])
+        elif isinstance(param, IntegerParam):
+            assert param.min is not None and param.max is not None, 'For hyperopt, min and max needed for %s' % param.opt
+            distrib = hp.quniform(name, param.min, param.max, 1)
+            format[param.opt] = str_int
+        else:
+            raise TypeError(param)
+
+        if param.omit:
+            distrib = hp.choice(name + '_outer', ['', distrib])
+
+        return distrib
+
+    gridparams = []
+    base_args = []
+    tunable_params = []
+    hierarch_params = [x.replace('-', '') for x in (options.hyperopt_hierarchy or '').split(',')]
+    tunable_params_dict = {}
+
+    for param in args:
+        if isinstance(param, BaseParam) and param.opt.replace('-', '') in hierarch_params:
+            assert isinstance(param, (ValuesParam, BinaryParam))
+            gridparams.append(param)
+        elif 'all_categorical' in hierarch_params and isinstance(param, (ValuesParam, BinaryParam)):
+            gridparams.append(param)
+        elif isinstance(param, BaseParam):
+            tunable_params.append(param)
+            tunable_params_dict[param.opt] = param
+        else:
+            base_args.append(param)
+
+    choices = []
+
+    already_seen = set()
+
+    for grid_param in expand(gridparams):
+        assert isinstance(grid_param, list), grid_param
+        grid_param = vw_normalize_params(grid_param)
+        grid_param = ' '.join(grid_param)
+
+        if grid_param in already_seen:
+            # filter out things like "--ngram 1 --skips 1"
+            continue
+
+        already_seen.add(grid_param)
+
+        local_space = {}
+        for param in tunable_params:
+            local_space[param.opt] = convert_to_hyperopt(param)
+
+        if local_space:
+            choices.append((grid_param, local_space))
+        else:
+            choices.append(grid_param)
+
+    space = {'grid': hp.choice('grid', choices)}
+
+    if best_result is None:
+        best_result = {}
+
+    best_result[MARKER_BRANCHBEST] = (float('inf'), None)
+
+    def run(params):
+        log('Parameters: %r', params, importance=-1)
+        args = base_args[:]
+
+        assert len(params) == 1, params
+        params = params.pop('grid')
+        assert len(params) == 2, params
+
+        base, rest = params
+
+        args.append(base)
+
+        for key, value in sorted(rest.items()):
+            if value == '' or value == 0 or value is None:
+                args.append('')
+                continue
+            param_config = tunable_params_dict[key]
+            # unpack() is only used by LogParam and hyperopt does exponentiation of its own
+            param_config._unpack = None
+            args.append(param_config.get_extra_args(value))
+
+        result, y_pred_text, is_best, y_pred_text_test = run_single_iteration(
+            vw_filename,
+            vw_validation_filename,
+            vw_test_filename,
+            kfold,
+            args,
+            workers,
+            metrics,
+            y_true,
+            sample_weight,
+            config,
+            best_result,
+            with_predictions=intermediate_results,
+            validation_holdout=validation_holdout)
+
+        if result is None:
+            return float('inf')
+
+        if intermediate_results:
+            data = intermediate_context.copy()
+            data['result'] = result
+            data['args'] = args
+            data['y_pred_text'] = ''.join(y_pred_text)
+            if y_pred_text_test:
+                data['y_pred_text_test'] = ''.join(y_pred_text_test)
+
+            save_intermediate_results(intermediate_results, data)
+
+        return result
+
+    env_rseed = os.environ.get('HYPEROPT_FMIN_SEED', '')
+    if env_rseed:
+        rstate = np.random.RandomState(int(env_rseed))
+    else:
+        rstate = np.random.RandomState()
+
+    domain = base.Domain(run, space, pass_expr_memo_ctrl=False)
+    trials, FMinIter2 = setup_hyperopt_Trials(domain, workers)
+
+    algo = _import('hyperopt.%s.suggest' % options.hyperopt_alg)
+    rval = FMinIter2(algo=algo, domain=domain, trials=trials, rstate=rstate, max_queue_len=workers or 1, poll_interval_secs=0.1)
+
+    assert rounds is not None
+    try:
+        rval.run(rounds)
+    finally:
+        if hasattr(trials, 'shutdown'):
+            trials.shutdown()
 
     return best_result[MARKER_BRANCHBEST]
 
@@ -2712,7 +3025,11 @@ def classification_report(y_true, y_pred, labels=None, sample_weight=None, digit
     return results
 
 
-def main_tune(metric, config, filename, validation, test, format, y_true, sample_weight, args, preprocessor_base, kfold, ignoreheader, workers, intermediate_results, nm2):
+def _id(x):
+    return x
+
+
+def main_tune(metric, config, filename, validation, test, validation_holdout, format, y_true, sample_weight, args, preprocessor_base, kfold, ignoreheader, workers, intermediate_results, nm2, hyperopt_rounds):
     if preprocessor_base is None:
         preprocessor_base = []
     else:
@@ -2735,6 +3052,11 @@ def main_tune(metric, config, filename, validation, test, format, y_true, sample
     best_result = {}
     if len(preprocessor_variants) > 1:
         best_result[MARKER_BEST] = (float('inf'), None)
+
+    if not is_loss(optimization_metric):
+        do_abs = abs
+    else:
+        do_abs = _id
 
     for my_args in preprocessor_variants:
         preprocessor = Preprocessor.from_options(preprocessor_base + my_args)
@@ -2789,7 +3111,19 @@ def main_tune(metric, config, filename, validation, test, format, y_true, sample
 
             vw_args = [x for x in my_args if getattr(x, 'opt', None) or str(x).split()[0] not in Preprocessor.ALL_OPTIONS_DASHDASH]
 
-            this_best_result, this_best_options = vw_optimize(
+            if hyperopt_rounds:
+                opt = vw_optimize_hyperopt
+                extra = {
+                    'rounds': hyperopt_rounds,
+                }
+            else:
+                opt = vw_optimize
+                extra = {}
+
+            if nm2:
+                extra['nm2'] = nm2
+
+            this_best_result, this_best_options = opt(
                 vw_filename,
                 vw_validation_filename,
                 vw_test_filename,
@@ -2803,7 +3137,8 @@ def main_tune(metric, config, filename, validation, test, format, y_true, sample
                 best_result=best_result,
                 intermediate_results=intermediate_results,
                 intermediate_context={'preprocessor_opts': preprocessor_opts},
-                nm2=nm2)
+                validation_holdout=validation_holdout,
+                **extra)
         finally:
             unlink(*to_cleanup)
 
@@ -2817,14 +3152,14 @@ def main_tune(metric, config, filename, validation, test, format, y_true, sample
         if len(preprocessor_variants) > 1:
             if preprocessor_opts:
                 log_always('Best options with %s = %s', preprocessor_opts or 'no preprocessing', this_best_options)
-            log_always('Best %s with %r = %s%s', optimization_metric, preprocessor_opts or 'no preprocessing', _frmt_score(this_best_result), is_best)
+            log_always('Best %s with %r = %s%s', optimization_metric, preprocessor_opts or 'no preprocessing', _frmt_score(do_abs(this_best_result)), is_best)
         # print 'Improvement over no l1=%.4f. Improvement over initial guess=%.4f' % (no_l1_result - best_result[0], initial_l1_result - best_result[0])
 
     # XXX don't show this if preprocessor is not enabled and not tuned
     if len(preprocessor_variants) > 1:
         log_always('Best preprocessor options = %s', best_preprocessor_opts or '<none>')
     log_always('Best vw options = %s', best_vw_options)
-    log_always('Best %s = %s', optimization_metric, _frmt_score(best_result_so_far))
+    log_always('Best %s = %s', optimization_metric, _frmt_score(do_abs(best_result_so_far)))
     # print 'Improvement over no l1=%.4f. Improvement over initial guess=%.4f' % (no_l1_result - best_result[0], initial_l1_result - best_result[0])
     preprocessor = Preprocessor.from_options(best_preprocessor_opts)
     return best_vw_options, preprocessor
@@ -2945,8 +3280,6 @@ def _frmt_score(x):
         else:
             return str(x)
     if isinstance(x, float):
-        if x < 0:
-            x = -x
         # %g would use scientific notation for big numbers
         # %f alone would add trailing zeros
         x = '%f' % x
@@ -3256,6 +3589,7 @@ def main(to_cleanup):
     parser.add_option('--validation')
     parser.add_option('--test')
     parser.add_option('--intermediate_results')
+    parser.add_option('--validation_holdout', type=float, default=0)
 
     # class weight option
     parser.add_option('--weight', action='append', help='Class weights to use in CLASS:WEIGHT format', default=[])
@@ -3313,6 +3647,11 @@ def main(to_cleanup):
     parser.add_option('--tmp', default='.vwoptimize /tmp/vwoptimize')
     parser.add_option('--foldscript')
 
+    # enable hyperopt
+    parser.add_option('--hyperopt', type=int)
+    parser.add_option('--hyperopt_alg', default='tpe')
+    parser.add_option('--hyperopt_hierarchy')
+
     tune_args = []
     args = sys.argv[1:]
     index = 0
@@ -3363,6 +3702,8 @@ def main(to_cleanup):
 
     if options.breakdown:
         options.breakdown = re.compile(options.breakdown)
+
+    globals()['options'] = options
 
     config = {
         'orig_commang': ' '.join(sys.argv)
@@ -3510,11 +3851,14 @@ def main(to_cleanup):
     examples = read_argument(args, '--examples', type=int)
 
     if need_y_true_and_y_pred:
-        y_true_filename = options.validation or filename
-        assert y_true_filename is not None
-        y_true, sample_weight = read_y_true(y_true_filename, format, config.get('columnspec'), options.ignoreheader, config.get('named_labels'), config.get('remap_label'), examples=examples)
-        if not len(y_true):
-            sys.exit('%s is empty' % y_true_filename)
+        if options.validation:
+            y_true, sample_weight = read_y_true(options.validation, format, config.get('columnspec'), options.ignoreheader, config.get('named_labels'), config.get('remap_label'))
+            if not len(y_true):
+                sys.exit('%s is empty' % options.validation)
+        else:
+            y_true, sample_weight = read_y_true(filename, format, config.get('columnspec'), options.ignoreheader, config.get('named_labels'), config.get('remap_label'), examples=examples)
+            if not len(y_true):
+                sys.exit('%s is empty' % filename)
         if not config.get('named_labels') and not is_multiclass:
             min_label = np.min(y_true)
             max_label = np.max(y_true)
@@ -3595,6 +3939,7 @@ def main(to_cleanup):
             filename=filename,
             validation=options.validation,
             test=options.test,
+            validation_holdout=options.validation_holdout,
             y_true=y_true,
             sample_weight=sample_weight,
             format=format,
@@ -3604,7 +3949,9 @@ def main(to_cleanup):
             ignoreheader=options.ignoreheader,
             workers=options.workers,
             intermediate_results=options.intermediate_results,
-            nm2=options.nm2)
+            nm2=options.nm2,
+            hyperopt_rounds=options.hyperopt,
+        )
         if vw_args is None:
             sys.exit('tuning failed')
         config['preprocessor'] = str(preprocessor) if preprocessor else None
