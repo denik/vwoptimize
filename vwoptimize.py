@@ -1506,6 +1506,8 @@ def NM2():
             
         if key == '--max_evals':
             MAX_EVALS = int(arg)
+        elif key in set(['-f','--final_regressor']):
+            continue
         elif log_re.match(arg):
             param_space.append(('log',key,arg.split("/")))
         elif num_re.match(arg):
