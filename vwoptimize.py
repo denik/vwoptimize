@@ -1419,16 +1419,10 @@ intermediate_counter = 0
 def initial_simplex(tunable_params):
     N = len(tunable_params)
     sim = np.zeros((N + 1, N), dtype=float)
-    sim[0] = np.array([param.init for param in tunable_params])
-    for k in range(N):
-        y = np.zeros(N)
-        for i, param in zip(range(N), tunable_params):
-            if isinstance(param, FloatParam):
-                y[i] = np.random.uniform(param.min, param.max)
-            elif isinstance(param, LogParam):
-                y[i] = np.random.uniform(np.log(param.min), np.log(param.max))
-            elif isinstance(param, IntegerParam):
-                y[i] = np.random.choice(range(param.min, param.max + 1))
+    sim[0] = np.array([param.pack(param.min) for param in tunable_params])
+    for k, param in zip(range(N), tunable_params):
+        y = np.array(sim[k], copy=True)
+        y[k] = param.pack(param.max)
         sim[k + 1] = y
     return sim
 
