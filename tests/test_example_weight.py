@@ -35,6 +35,14 @@ Best vw options = --quiet -b 2
 Best acc = 0.52381
 acc = 0.52381
 
+$ printf '1 mail-555| hello' | vwoptimize.py -d - --metric acc 2>&1 | egrep 'average loss|acc'
+average loss = 1.000000
+acc = 1
+
+$ printf '1 mail-555|f hello' | vwoptimize.py -d - --metric acc --weight 1:0.5 2>&1 | egrep 'average loss|acc'
+average loss = 1.000000
+acc = 1
+
 [cleanup]
 $ ls .vwoptimize
 <BLANKLINE>

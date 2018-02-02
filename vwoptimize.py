@@ -882,7 +882,7 @@ def _load_predictions(file, size=None, with_text=False, named_labels=None, with_
             if importance_weights is not None:
                 if len(items) >= 2:
                     w = items[1]
-                    if w.startswith('|') or w.startswith("'"):
+                    if w.startswith("'") or '|' in w:
                         w = 1.0
                     else:
                         w = float(w)
@@ -2117,7 +2117,7 @@ def convert_row_to_vw(row, columnspec, preprocessor, weights, named_labels, rema
         if preprocessor is None and not weights and not remap_label:
             return row
 
-        items = re.split(r'(\|[^\s]*)', row)
+        items = re.split(r'([^\s]*\|[^\s]*)', row)
         label = items[0]
 
         if preprocessor is None:
