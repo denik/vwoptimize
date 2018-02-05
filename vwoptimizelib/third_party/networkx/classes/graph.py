@@ -14,9 +14,9 @@ For directed graphs see DiGraph and MultiDiGraph.
 #    All rights reserved.
 #    BSD license.
 from copy import deepcopy
-import networkx as nx
-from networkx.exception import NetworkXError
-import networkx.convert as convert
+#import networkx as nx
+from ..exception import NetworkXError
+from .. import convert
 
 __author__ = """\n""".join(['Aric Hagberg (hagberg@lanl.gov)',
                             'Pieter Swart (swart@lanl.gov)',

@@ -1,3 +1,6 @@
+from ..networkx.classes.digraph import DiGraph
+from ..networkx.algorithms.dag import topological_sort
+'''
 """
 NetworkX
 ========
@@ -97,3 +100,4 @@ from networkx.tests.test import run as test
 
 import networkx.drawing
 from networkx.drawing import *
+'''

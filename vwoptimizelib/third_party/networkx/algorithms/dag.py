@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from fractions import gcd
-import networkx as nx
-from networkx.utils.decorators import *
+from ...networkx.exception import *
+from ...networkx.utils.decorators import *
 """Algorithms for directed acyclic graphs (DAGs)."""
 #    Copyright (C) 2006-2011 by
 #    Aric Hagberg <hagberg@lanl.gov>
@@ -129,7 +129,7 @@ def topological_sort(G, nbunch=None, reverse=False):
         http://www.amazon.com/exec/obidos/ASIN/0387948600/ref=ase_thealgorithmrepo/
     """
     if not G.is_directed():
-        raise nx.NetworkXError(
+        raise NetworkXError(
             "Topological sort not defined on undirected graphs.")
 
     # nonrecursive version
@@ -154,7 +154,7 @@ def topological_sort(G, nbunch=None, reverse=False):
             for n in G[w]:
                 if n not in explored:
                     if n in seen:  # CYCLE !!
-                        raise nx.NetworkXUnfeasible("Graph contains a cycle.")
+                        raise NetworkXUnfeasible("Graph contains a cycle.")
                     new_nodes.append(n)
             if new_nodes:   # Add new_nodes to fringe
                 fringe.extend(new_nodes)

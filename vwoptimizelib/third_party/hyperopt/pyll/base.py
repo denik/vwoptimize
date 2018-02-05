@@ -12,7 +12,7 @@ import time
 
 from collections import deque
 
-from vwoptimizelib.thirdparty import networkx as nx
+from ... import networkx as nx
 
 # TODO: move things depending on numpy (among others too) to a library file
 import numpy as np

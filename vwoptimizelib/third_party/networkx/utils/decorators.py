@@ -3,9 +3,9 @@ import sys
 from collections import defaultdict
 from os.path import splitext
 
-import networkx as nx
-from decorator import decorator
-from networkx.utils import is_string_like
+#import networkx as nx
+from ...decorator import decorator
+from ...networkx.utils.misc import is_string_like
 
 __all__ = [
     'not_implemented_for',

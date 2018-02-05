@@ -39,7 +39,7 @@ except ImportError:
             total = func(total, element)
             yield total
 
-import networkx as nx
+#import networkx as nx
 
 __author__ = '\n'.join(['Aric Hagberg (hagberg@lanl.gov)',
                         'Dan Schult(dschult@colgate.edu)',

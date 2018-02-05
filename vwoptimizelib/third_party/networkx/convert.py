@@ -22,7 +22,6 @@ nx_agraph, nx_pydot
 #    All rights reserved.
 #    BSD license.
 import warnings
-import networkx as nx
 __author__ = """\n""".join(['Aric Hagberg <aric.hagberg@gmail.com>',
                            'Pieter Swart (swart@lanl.gov)',
                            'Dan Schult(dschult@colgate.edu)'])

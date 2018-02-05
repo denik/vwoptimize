@@ -1,3 +1,4 @@
+"""
 from networkx.algorithms.assortativity import *
 from networkx.algorithms.block import *
 from networkx.algorithms.boundary import *
@@ -73,3 +74,4 @@ from .tree.branchings import (
 	maximum_branching, minimum_branching,
 	maximum_spanning_arborescence, minimum_spanning_arborescence
 )
+"""
