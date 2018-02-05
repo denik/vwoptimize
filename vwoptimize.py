@@ -1479,7 +1479,7 @@ def initial_simplex(tunable_params):
     return sim
 
 
-def vw_optimize(vw_filename, vw_validation_filename, vw_test_filename, y_true, kfold, args, metrics, config, sample_weight, workers, best_result, intermediate_results, intermediate_context, validation_holdout, nm2):
+def vw_optimize(vw_filename, vw_validation_filename, vw_test_filename, y_true, kfold, args, metrics, config, sample_weight, workers, best_result, intermediate_results, intermediate_context, validation_holdout, nm2=None):
     gridsearch_params = []
     tunable_params = []
     base_args = []
@@ -1602,9 +1602,9 @@ def vw_optimize(vw_filename, vw_validation_filename, vw_test_filename, y_true, k
 
 
 def setup_hyperopt_Trials(domain, workers):
-    from hyperopt import base
-    from hyperopt.utils import coarse_utcnow
-    from hyperopt.fmin import FMinIter
+    from vwoptimizelib.third_party.hyperopt import base
+    from vwoptimizelib.third_party.hyperopt.utils import coarse_utcnow
+    from vwoptimizelib.third_party.hyperopt.fmin import FMinIter
     import threading
     from Queue import Queue
     import traceback
@@ -1713,7 +1713,7 @@ def str_int(x):
 
 def vw_optimize_hyperopt(vw_filename, vw_validation_filename, vw_test_filename, y_true, kfold, args, metrics, config, sample_weight, workers, best_result, intermediate_results, intermediate_context, rounds, validation_holdout):
     assert isinstance(args, list), args
-    from hyperopt import tpe, hp, base
+    from vwoptimizelib.third_party.hyperopt import hp, base
 
     space = {}
     format = {}
@@ -1859,8 +1859,10 @@ def vw_optimize_hyperopt(vw_filename, vw_validation_filename, vw_test_filename, 
     domain = base.Domain(run, space, pass_expr_memo_ctrl=False)
     trials, FMinIter2 = setup_hyperopt_Trials(domain, workers)
 
-    algo = _import('hyperopt.%s.suggest' % options.hyperopt_alg)
-    rval = FMinIter2(algo=algo, domain=domain, trials=trials, rstate=rstate, max_queue_len=workers or 1, poll_interval_secs=0.1)
+    if '.' not in options.hyperopt_alg:
+        options.hyperopt_alg = 'vwoptimizelib.third_party.hyperopt.%s.suggest' % options.hyperopt_alg
+    alg = _import(options.hyperopt_alg)
+    rval = FMinIter2(algo=alg, domain=domain, trials=trials, rstate=rstate, max_queue_len=workers or 1, poll_interval_secs=0.1)
 
     assert rounds is not None
     try:
