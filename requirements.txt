@@ -1,3 +1,5 @@
 numpy
 sklearn
 scipy
+future
+six
