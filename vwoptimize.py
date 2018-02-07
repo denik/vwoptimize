@@ -1094,6 +1094,29 @@ def get_format(value):
         return '%%.%sf' % len(x)
 
 
+def parse_tuning_args(args):
+    """
+    >>> parse_tuning_args('--lowercase_features?'.split())
+    [BinaryParam(opt='--lowercase_features')]
+
+    >>> parse_tuning_args('--onethread --lowercase_features?'.split())
+    ['--onethread', BinaryParam(opt='--lowercase_features')]
+    """
+    assert isinstance(args, list), type(args)
+    args = args[:]
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg.startswith('-'):
+            next_arg = args[index + 1] if index + 1 < len(args) else ''
+            if arg.endswith('?'):
+                args[index] = get_tuning_config(arg)
+            elif next_arg.endswith('?') and not next_arg.startswith('-'):
+                args[index:index + 2] = [get_tuning_config(arg + ' ' + next_arg)]
+        index += 1
+    return args
+
+
 def get_tuning_config(config):
     """
     >>> get_tuning_config('--hash_seed randint(10000)?')
@@ -3922,16 +3945,7 @@ def main(to_cleanup):
         else:
             options.predictions = None
 
-    index = 0
-    while index < len(args):
-        arg = args[index]
-        if arg.startswith('-'):
-            next_arg = args[index + 1] if index + 1 < len(args) else ''
-            if arg.endswith('?'):
-                args[index] = get_tuning_config(arg)
-            elif next_arg.endswith('?'):
-                args[index:index + 2] = [get_tuning_config(arg + ' ' + next_arg)]
-        index += 1
+    args = parse_tuning_args(args)
 
     if need_tuning:
         # QQQ --initial_regressor is not passed there
