@@ -1597,10 +1597,10 @@ def vw_optimize(vw_filename, vw_validation_filename, vw_test_filename, y_true, k
         if tunable_params:
             import scipy.optimize
 
+            options = {'xtol': 0.001, 'ftol': 0.001}
+
             if nm2:
-                i_simplex = initial_simplex(tunable_params)
-            else:
-                i_simplex = None
+                options['initial_simplex'] = initial_simplex(tunable_params)
 
             results = initial_params_db.find_nearest(params_vector)
             if results:
