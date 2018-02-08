@@ -38,6 +38,12 @@ Traceback (most recent call last):
  ...
 ImportError: No module named bla
 
+$ HYPEROPT_FMIN_SEED=20 vwoptimize.py --adaptive? -d iris.vw --hyperopt 2 --quiet
+Result vw --quiet --adaptive : vw_average_loss=1.440247*
+Result vw --quiet --adaptive : vw_average_loss=1.440247
+Best vw options = --quiet --adaptive
+Best vw_average_loss = 1.440247
+
 [cleanup]
 $ ls .vwoptimize
 <BLANKLINE>

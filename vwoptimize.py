@@ -1053,6 +1053,12 @@ class BinaryParam(BaseParam):
     def enumerate_all(self):
         return ['', self.opt]
 
+    def get_extra_args(self, param):
+        if param:
+            return self.opt
+        else:
+            return ''
+
 
 def get_format(value):
     """
@@ -1603,7 +1609,7 @@ def vw_optimize(vw_filename, vw_validation_filename, vw_test_filename, y_true, k
                 t_params = initial_params_init
 
             try:
-                optresult = scipy.optimize.minimize(run, t_params, method='Nelder-Mead', options={'xtol': 0.001, 'ftol': 0.001, 'initial_simplex': i_simplex})
+                optresult = scipy.optimize.minimize(run, t_params, method='Nelder-Mead', options=options)
             except InterruptOptimization, ex:
                 log(str(ex), importance=1)
             else:
