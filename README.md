@@ -12,9 +12,11 @@ Drop-in wrapper for [Vowpal Wabbit](https://github.com/JohnLangford/vowpal_wabbi
   * [Text processing](#text-processing)
 * [Saving &amp; loading configuration](#saving--loading-configuration)
 
-## Hyper-parameter tuning
+# Hyper-parameter tuning
 
-vwoptimize.py can automatically select the best hyper-parameters, by doing grid search for discrete and Nelder-Mead search for continuous parameters.
+vwoptimize.py can automatically select the best hyper-parameters, by doing grid search for discrete and Nelder-Mead search for continuous parameters or by optimizing all parameters at once using [hyperopt](https://github.com/hyperopt/hyperopt).
+
+## Using grid-search
 
 In order to enable grid search, list possible values separated by a slash and append a question mark. For example,
 
@@ -22,13 +24,23 @@ In order to enable grid search, list possible values separated by a slash and ap
 
 will try 6 configurations, select the one that gives the lowest progressive validation loss (reported by VW as `average loss`) and save the best model in "my.model" file.
 
+## Using Nelder-Mead
+
 If there is no slash but there is a question mark, the parameter is treated as a float and fine-tuned using Nelder-Mead algorithm from [scipy](https://docs.scipy.org/doc/scipy/reference/optimize.minimize-neldermead.html):
 
     $ vwoptimize.py -d rcv1.train.vw -b 24 --ngram /2? --learning_rate 0.500? --l1 1e-07?
 
 The number of digits after comma controls the precision of the tuner (if "0.500?" is specified then "0.500" and "0.501" might be tried but not "0.5005"). If the number is written in scientific notation ("1e-07?") then the search is done in log-space.
 
-### Specifying metric to optimize
+## Using hyperopt
+
+Adding "--hyperopt N" enables optimization using hyperopt for N rounds. For that to work, one need to provide boundaries for each parameter. For example,
+
+    $ vwoptimize.py -d rcv1.train.vw -b 24 --ngram 1..3? --learning_rate 0.100..5.000? --l1 1e-11..1e-2?
+
+In order to select optimization algorithm, use --hyperopt_alg ALG where ALG can be "tpe" or "rand" or "package_name.module_name.function_name" for custom implementation of hyperopt's "suggest" method.
+
+## Specifying metric to optimize
 
 By default, vwoptimize.py reads the loss reported by Vowpal Wabbit and uses that as an optimization objective. It is also possible to specify custom metrics. For example, this will try different loss functions and select the one that gives the best accuracy:
 
@@ -44,7 +56,7 @@ If the value of `--metric` is a comma-separated list, then only the first one is
 
 will perform the same optimization as previous but also report extra metrics for each run.
 
-### Cross-validation
+## Cross-validation
 
 When doing multiple passes over data, the metrics reported by `--metric` are no longer suitable for tuning (vwoptimize.py does not automatically switches to using holdout set like VW itself does and thus ends up using predictions over already seen examples). K-fold cross validation avoids that by explicitly separating training and testing sets:
 
@@ -62,7 +74,7 @@ The --metric option can be used without the optimizer, in a regular run:
 
 ## Preprocessing the input
 
-### Handling CSV/TSV inputs
+## Handling CSV/TSV inputs
 
 vwoptimize.py can work with CSV/TSV files. One need to specify `--columnspec` that describes how to interpret each column:
 
@@ -93,7 +105,7 @@ Other useful `--columnspec` values:
   * `weight_train` is like `--weight` but it is not taken into account when calculating the metrics with `--metric` (only affects training)
   * `weight_metric` is like `--weight` but it does not affect training (only affects `--metric`)
 
-### Setting class weights
+## Setting class weights
 
     $ vwoptimize.py -d data.vw --weight 1:0.5,2:0.9
 
@@ -101,7 +113,9 @@ This will multiply the weights of the examples that have label "1" by 0.5 and th
 
 The `--weight_train` option only affects the weights passed to VW but does not affect how the metrics are calculated. The `--weight_metric` does the opposite: it has not effect on training but it is used as sample weight when calculating metrics.
 
-### Text processing
+UPDATE: In recent VW, --classweight is equivalent to --weight_train.
+
+## Text processing
 
 The following text processing options are available:
 
