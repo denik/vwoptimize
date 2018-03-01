@@ -2114,6 +2114,7 @@ class Preprocessor(object):
         split_combined
         chinese_simplify
         NFKC
+        remove_duplicate_words
     '''.strip().split()
 
     ALL_OPTIONS_INT = '''
@@ -2239,6 +2240,15 @@ class Preprocessor(object):
 
             if self.stem:
                 words = stem_words(words)
+
+            if self.remove_duplicate_words:
+                seen = set()
+                new_words = []
+                for word in words:
+                    if word not in seen:
+                        new_words.append(word)
+                        seen.add(word)
+                words = new_words
 
             if self.split_chars:
                 words = [' '.join(w) for w in words]

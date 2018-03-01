@@ -189,6 +189,11 @@ $ vwoptimize.py -d simple.csv --max_length_offset 3 --tovw_simple /dev/stdout
 2 | dbye World. ond class
 1 | lo st class again
 
+[remove_duplicate_words]
+$ printf '1 | one two one three\\n' | vwoptimize.py -d - --tovw /dev/stdout --remove_duplicate_words
+preprocessor = --remove_duplicate_words
+1 | one two three
+
 [cleanup]
 $ ls .vwoptimize
 <BLANKLINE>
