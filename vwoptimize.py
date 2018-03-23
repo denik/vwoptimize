@@ -3424,7 +3424,6 @@ def print_top_differences(topdiff, y_true, y_pred, y_pred_text, y_pred2, y_pred_
 def cleanup_vw_train_options(vw_args):
     vw_args = vw_args.split()
     remove_option(vw_args, '--quiet', 0)
-    remove_option(vw_args, '-q', 0)
     remove_option(vw_args, '--progress', 1)
     remove_option(vw_args, '-P', 1)
     remove_option(vw_args, '--threads', 0)
