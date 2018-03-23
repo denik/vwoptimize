@@ -730,8 +730,14 @@ def extract_test_args(vw_args):
     if loss_function:
         test_args.append('--loss_function ' + loss_function)
 
-    if '--probabilities' in vw_args:
-        test_args.append('--probabilities')
+    test_opts = [
+        '--probabilities',
+        '--onethread',
+    ]
+
+    for opt in test_opts:
+        if opt in vw_args:
+            test_args.append(opt)
 
     return ' '.join(test_args)
 
