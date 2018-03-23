@@ -5,7 +5,7 @@ $ vwoptimize.py -d small_ag_news_binary.csv --strip_punct --lowercase --quiet --
 10-fold acc = 0.72
 10-fold vw_average_loss = 0.778847
 10-fold vw_train_average_loss = 0.951884
--0.403280,1,Clearing Out Fannie #39;s  #39;Phantoms #39;,Score one for the lion tamer. The federal regulator that oversees home-mortgage giant Fannie Mae finally persuaded that government-sponsored enterprise to agree to clean up its questionable accounting practices.
+-0.40328,1,Clearing Out Fannie #39;s  #39;Phantoms #39;,Score one for the lion tamer. The federal regulator that oversees home-mortgage giant Fannie Mae finally persuaded that government-sponsored enterprise to agree to clean up its questionable accounting practices.
 
 [toperrors_cv_float_0.0]
 $ vwoptimize.py -d small_ag_news_binary.csv --strip_punct --lowercase --quiet --toperrors 0.0 --kfold 10 | wc -l
@@ -22,7 +22,7 @@ $ vwoptimize.py -d small_ag_news_binary.csv --strip_punct --lowercase --quiet --
 10-fold acc = 0.72
 10-fold vw_average_loss = 0.778847
 10-fold vw_train_average_loss = 0.951884
--0.403280,1,Clearing Out Fannie #39;s  #39;Phantoms #39;,Score one for the lion tamer. The federal regulator that oversees home-mortgage giant Fannie Mae finally persuaded that government-sponsored enterprise to agree to clean up its questionable accounting practices.
+-0.40328,1,Clearing Out Fannie #39;s  #39;Phantoms #39;,Score one for the lion tamer. The federal regulator that oversees home-mortgage giant Fannie Mae finally persuaded that government-sponsored enterprise to agree to clean up its questionable accounting practices.
 
 [toperrors_cv_int_2]
 $ vwoptimize.py -d small_ag_news_binary.csv --strip_punct --lowercase --quiet --toperrors 2 --kfold 10 | wc -l

@@ -289,8 +289,8 @@ $ vwoptimize.py -d tags.vw -p /dev/stdout --quiet
 [tags_kfold2]
 $ vwoptimize.py -d tags.vw --kfold 2 -p /dev/stdout
 2-fold vw_average_loss = 1.571069
--0.253423 tag1
-0.253423 tag2
+-0.253423
+0.253423
 
 [kfold1_error]
 $ vwoptimize.py -d tags.vw -p /dev/stdout --kfold 1
